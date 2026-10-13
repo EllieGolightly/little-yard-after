@@ -4,3 +4,6 @@ work/
 outputs/
 .DS_Store
 *.log
+
+# Local hosting identity is not used by GitHub Pages
+.openai/

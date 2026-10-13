@@ -40,7 +40,7 @@ test('export/import round trips the canonical game and a bare game without stora
   const serialized = exportGame(state);
   const wrapper = JSON.parse(serialized);
   assert.equal(wrapper.format, 'little-yard-after');
-  assert.equal(wrapper.version, 1);
+  assert.equal(wrapper.version, 2);
   assert.equal(Number.isNaN(Date.parse(wrapper.savedAt)), false);
   assert.deepEqual(importGame(serialized), validateSave(state));
   assert.deepEqual(importGame(JSON.stringify(state)), validateSave(state));
@@ -53,7 +53,7 @@ test('rejects broken, foreign, incompatible and oversized imports', () => {
     assert.throws(() => importGame(text));
   }
   assert.throws(() => importGame(JSON.stringify({ format: 'other', version: 1, game: createGame() })), /不是/);
-  assert.throws(() => importGame(JSON.stringify({ format: 'little-yard-after', version: 2, game: createGame() })), /版本/);
+  assert.throws(() => importGame(JSON.stringify({ format: 'little-yard-after', version: 99, game: createGame() })), /版本/);
   assert.throws(() => importGame(' '.repeat(1024 * 1024 + 1)), /1 MB/);
   assert.throws(() => importGame('水'.repeat(400_000)), /1 MB/);
 });
@@ -166,4 +166,16 @@ test('read and deletion failures are returned, and clearing removes only this ga
   });
   assert.deepEqual(clearGame(), { ok: true });
   assert.deepEqual([...data.entries()], [['unrelated', 'keep me']]);
+});
+
+test('v1 migration preserves inventory, plots, budget and an immutable first-upgrade backup',async()=>{
+ const {readFile}=await import('node:fs/promises');
+ const old=JSON.parse(await readFile(new URL('./fixtures/v1-day4.json',import.meta.url),'utf8'));
+ const raw=JSON.stringify({format:'little-yard-after',version:1,game:old});
+ const {data,writes}=mockStorage({[STORAGE_KEY]:raw});
+ const migrated=loadGame().state;assert.equal(migrated.version,2);assert.equal(migrated.day,4);assert.equal(migrated.money,old.money);assert.deepEqual(migrated.plots,old.plots);
+ for(const[k,q]of Object.entries(old.inventory))assert.equal(migrated.inventory[k],q);
+ assert.equal(migrated.animals.coop.female,2);assert.equal(migrated.animals.coop.male,1);assert.equal(migrated.settings.cookPower,'auto');assert.equal(migrated.health,100);assert.deepEqual(writes,[]);
+ assert.equal(saveGame(migrated).ok,true);assert.equal(data.get(`${STORAGE_KEY}:legacy-v1`),raw);assert.equal(saveGame(migrated).ok,true);assert.equal(data.get(`${STORAGE_KEY}:legacy-v1`),raw);assert.deepEqual(validateSave(migrated),migrated);
+ old.inventory.food=-1;assert.throws(()=>importGame(JSON.stringify(old)));
 });

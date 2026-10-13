@@ -1,0 +1,110 @@
+{
+  "version": 1,
+  "phase": "survival",
+  "day": 4,
+  "money": 5520,
+  "inventory": {
+    "food": 36,
+    "water": 224,
+    "feed": 114,
+    "fuel": 10,
+    "seeds": 17,
+    "vegetables": 0,
+    "eggs": 0,
+    "fish": 0,
+    "power": 10.8
+  },
+  "facilities": {
+    "tank": 1,
+    "rain": 1,
+    "filter": 1,
+    "battery": 1,
+    "solar": 1,
+    "fridge": 1,
+    "coop": 1,
+    "planter": 2,
+    "stove": 1,
+    "books": 1,
+    "bed": 1,
+    "generator": 1
+  },
+  "plots": [
+    {
+      "crop": "greens",
+      "progress": 3
+    },
+    {
+      "crop": null,
+      "progress": 0
+    },
+    {
+      "crop": null,
+      "progress": 0
+    }
+  ],
+  "settings": {
+    "generator": true,
+    "fridge": true,
+    "autoCare": true
+  },
+  "livestock": {
+    "coop": 1,
+    "ducks": 0,
+    "pond": 0
+  },
+  "logs": [
+    {
+      "day": 3,
+      "title": "第 3 天 · 阵雨",
+      "text": "雨滴落在屋檐上。原来听雨，也可以是一件很踏实的事。\n补充 56 L 清洁水。",
+      "kind": "day"
+    },
+    {
+      "day": 2,
+      "title": "第 2 天 · 多云",
+      "text": "外面的街道比往常安静。你给窗边的杯子续上水，日子还长。\n母鸡送来了 2 份禽蛋。",
+      "kind": "day"
+    },
+    {
+      "day": 1,
+      "title": "第 1 天 · 晴朗",
+      "text": "你把门口最后一个纸箱拆开，屋子里开始有了自己的秩序。",
+      "kind": "day"
+    },
+    {
+      "day": 1,
+      "title": "小院里的小事",
+      "text": "第 1 块地种下了小青菜，照料 4 天后成熟。",
+      "kind": "plant"
+    },
+    {
+      "day": 1,
+      "title": "门关上，日子开始",
+      "text": "城里的供水供电停了下来。院门内，是你亲手准备的小世界。今天起每天结算一日生活；种植与养殖按设置自动照料，成熟的作物需要亲手收获。",
+      "kind": "story"
+    },
+    {
+      "day": 0,
+      "title": "又安心了一些",
+      "text": "27 件物资已送到家，花费 ¥24480。",
+      "kind": "purchase"
+    },
+    {
+      "day": 0,
+      "title": "小院的钥匙",
+      "text": "一座带小院的房子，三万元预算，还有重新安排生活的时间。家中已有 7 份食物、35 L 水、6 袋种子和一块种植地。",
+      "kind": "story"
+    }
+  ],
+  "stats": {
+    "harvests": 0,
+    "assists": 0,
+    "days": 3
+  },
+  "lastCookDay": null,
+  "lastCareDay": 3,
+  "mealBonus": 0,
+  "fridgeRunning": true,
+  "lightsOn": false,
+  "milestoneSeen": false
+}

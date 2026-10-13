@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { ITEMS, STARTER_CART, CROPS, RESOURCE_META } from '../src/data.js';
-import { createGame, buyCart, startGame, advanceDay, act, getDerived, getForecast, getCropDuration, validateSave } from '../src/engine.js';
+import { createGame, buyCart, startGame, advanceDay, act, getDerived, getForecast, getCropDuration, validateSave, getStarterCart, getMealPreview, getAnimalInfo } from '../src/engine.js';
 
 function unwrap(result) {
   assert.equal(result.error, undefined, result.error);
@@ -68,7 +68,7 @@ test('prep and survival operations cannot cross phases; day settles exactly once
   assert.equal(result.report.day, 1);
   assert.equal(result.state.day, 2);
   assert.equal(result.state.stats.days, 1);
-  assert.equal(result.state.inventory.food, 6);
+  assert.equal(result.state.inventory.food, 7);
   assert.equal(result.state.inventory.water, 31);
   assert.equal(state.inventory.food, 7);
   assertValid(result.state);
@@ -113,59 +113,6 @@ test('greenhouse, compost and seed tools have their documented effects', () => {
   assertValid(state);
 });
 
-test('manual care is limited to once a day and prevents duplicate automatic growth', () => {
-  let state = started({ coop: 1, feed: 2, tank: 1, water: 2 });
-  state = unwrap(act(state, { type: 'plant', plot: 0, crop: 'greens' }));
-  state = unwrap(act(state, { type: 'care' }));
-  assert.equal(state.plots[0].progress, 1);
-  assert.equal(state.livestock.coop, 1);
-  assert.equal(state.inventory.feed, 58);
-  assert.ok(act(state, { type: 'care' }).error);
-  state = unwrap(advanceDay(state));
-  assert.equal(state.plots[0].progress, 1);
-  assert.equal(state.livestock.coop, 1);
-  state = unwrap(act(state, { type: 'settings', key: 'autoCare', value: false }));
-  const before = structuredClone(state.inventory);
-  state = unwrap(advanceDay(state));
-  assert.equal(state.plots[0].progress, 1);
-  assert.equal(state.inventory.feed, before.feed);
-  state = unwrap(act(state, { type: 'care' }));
-  assert.equal(state.plots[0].progress, 2);
-  assert.equal(state.inventory.eggs, 2);
-  assertValid(state);
-});
-
-test('without feed or spare water livestock and plants pause safely with progress preserved', () => {
-  let state = started({ coop: 1 });
-  state = unwrap(act(state, { type: 'plant', plot: 0, crop: 'greens' }));
-  state.inventory.water = 4;
-  const result = advanceDay(state);
-  assert.equal(result.state.inventory.water, 0);
-  assert.equal(result.state.plots[0].progress, 0);
-  assert.equal(result.state.livestock.coop, 0);
-  assert.equal(result.state.stats.assists, 0);
-  assert.ok(result.report.events.some(event => event.includes('暂停')));
-  assertValid(result.state);
-});
-
-test('all animal production cycles produce food at stated intervals and consume stated inputs', () => {
-  let state = started({ coop: 1, ducks: 1, pond: 1, feed: 4, tank: 1, water: 8, battery: 1, solar: 1, fridge: 1 });
-  const initialFeed = state.inventory.feed;
-  let eggsMade = 0;
-  let fishMade = 0;
-  for (let day = 0; day < 7; day += 1) {
-    const result = advanceDay(state);
-    eggsMade += result.report.events.filter(event => event.includes('禽蛋')).reduce((sum, event) => sum + Number(event.match(/(\d+) 份/)[1]), 0);
-    fishMade += result.report.events.filter(event => event.includes('鲜鱼')).reduce((sum, event) => sum + Number(event.match(/(\d+) 份/)[1]), 0);
-    state = result.state;
-  }
-  assert.equal(initialFeed - state.inventory.feed, 42);
-  assert.equal(eggsMade, 12);
-  assert.equal(fishMade, 5);
-  assert.equal(state.stats.assists, 0);
-  assertValid(state);
-});
-
 test('rain needs the filter and never exceeds capacity; battery is likewise bounded', () => {
   let filtered = started({ rain: 1, filter: 1, battery: 1, solar: 1 });
   let unfiltered = started({ rain: 1 });
@@ -195,76 +142,12 @@ test('generator burns fuel only when enabled and below threshold; refrigerator u
   assertValid(state);
 });
 
-test('fresh food spoilage occurs after meals only on each fourth day without powered refrigeration', () => {
-  let warm = started({ vegetables: 4 });
-  let cold = started({ vegetables: 4, fridge: 1, battery: 1, solar: 1 });
-  for (let day = 0; day < 4; day += 1) {
-    warm = unwrap(advanceDay(warm));
-    cold = unwrap(advanceDay(cold));
-  }
-  assert.equal(warm.inventory.vegetables, 15);
-  assert.equal(cold.inventory.vegetables, 20);
-  assert.equal(warm.inventory.food, 7);
-});
-
-test('cooking has exact input/output conservation and cannot run twice on the same day', () => {
-  let state = started({ stove: 1, vegetables: 1, eggs: 1, fuel: 1 });
-  const initial = structuredClone(state);
-  state = unwrap(act(state, { type: 'cook' }));
-  assert.equal(state.inventory.vegetables, initial.inventory.vegetables - 2);
-  assert.equal(state.inventory.eggs, initial.inventory.eggs - 1);
-  assert.equal(state.inventory.fuel, initial.inventory.fuel - 1);
-  assert.equal(state.inventory.food, initial.inventory.food + 6);
-  assert.equal(state.mealBonus, 3);
-  assert.ok(act(state, { type: 'cook' }).error);
-  assert.ok(act(started({ vegetables: 1, eggs: 1, fuel: 1 }), { type: 'cook' }).error);
-  assert.equal(initial.lastCookDay, null);
-  assertValid(state);
-});
-
-test('starter supports 36 deterministic days of mixed gardening without assistance and continues after milestone', () => {
-  const run = () => {
-    let state = started();
-    let milestones = 0;
-    for (let day = 0; day < 36; day += 1) {
-      state.plots.forEach((plot, index) => {
-        if (plot.crop && plot.progress >= getCropDuration(state, plot.crop)) state = unwrap(act(state, { type: 'harvest', plot: index }));
-        if (!state.plots[index].crop) state = unwrap(act(state, { type: 'plant', plot: index, crop: ['greens', 'potatoes', 'fodder'][index] }));
-      });
-      const result = advanceDay(state);
-      if (result.report.milestone) milestones += 1;
-      state = result.state;
-      assertValid(state);
-    }
-    assert.equal(state.day, 37);
-    assert.equal(state.stats.days, 36);
-    assert.equal(state.stats.assists, 0);
-    assert.ok(state.stats.harvests >= 15);
-    assert.equal(milestones, 1);
-    assert.equal(state.milestoneSeen, true);
-    return state;
-  };
-  assert.deepEqual(run(), run());
-});
-
-test('a completely unprepared home remains playable with explicitly recorded aid', () => {
-  let state = unwrap(startGame(createGame()));
-  for (let day = 0; day < 45; day += 1) {
-    state = unwrap(advanceDay(state));
-    assertValid(state);
-  }
-  assert.equal(state.day, 46);
-  assert.ok(state.stats.assists > 0);
-  assert.ok(state.logs.some(log => log.text.includes('应急援助')));
-  assert.ok(state.milestoneSeen);
-});
-
 test('save validation clones valid data and rejects malformed state, unsafe values and impossible capacity', () => {
   const valid = started();
   const copy = validateSave(valid);
   copy.inventory.food += 10;
   assert.notEqual(copy.inventory.food, valid.inventory.food);
-  const invalid = [null, [], {}, { ...valid, version: 2 }, { ...valid, day: -1 }, { ...valid, money: 30001 }];
+  const invalid = [null, [], {}, { ...valid, version: 99 }, { ...valid, day: -1 }, { ...valid, money: 30001 }];
   for (const mutate of [
     state => { state.inventory.water = -1; },
     state => { state.inventory.food = Infinity; },
@@ -277,7 +160,7 @@ test('save validation clones valid data and rejects malformed state, unsafe valu
     state => { state.settings.autoCare = 'yes'; },
     state => { state.stats.days = 3; },
     state => { state.logs[0].day = 99; },
-    state => { state.livestock.coop = 2; },
+    state => { state.animals.coop.cycle = 2; },
     state => { state.lastCareDay = -1; },
   ]) {
     const broken = structuredClone(valid);
@@ -296,4 +179,80 @@ test('catalog identifiers, dependency references and crop resource references ar
     for (const id of item.requires || []) assert.ok(ITEMS.some(other => other.id === id && other.kind === 'facility'));
   }
   for (const crop of CROPS) assert.ok(RESOURCE_META[crop.resource]);
+});
+
+test('three difficulties have affordable useful starter carts',()=>{
+ for(const [difficulty,money]of [['cozy',50000],['balanced',30000],['hard',20000]]){const s=createGame({difficulty});assert.equal(s.money,money);const n=unwrap(buyCart(s,getStarterCart(s)));assert.ok(n.money>=0);assert.ok(n.facilities.stove&&n.facilities.solar);assertValid(n);}
+});
+test('fractional meals consume only selected amounts; fasting and half portions reduce health',()=>{
+ let s=started();s.health=70;
+ assert.equal(getMealPreview(s).healthChange,-12);
+ const half=unwrap(act(s,{type:'meal',resource:'food',amount:.5}));
+ const n=unwrap(advanceDay(half));assert.equal(n.inventory.food,s.inventory.food-.5);assert.equal(n.health,64);assert.deepEqual(n.lastMealPlan,{food:.5});assert.deepEqual(n.mealPlan,{});
+ const full=unwrap(advanceDay(unwrap(act(s,{type:'meal',resource:'food',amount:1}))));assert.equal(full.health,71);
+ for(const a of [-1,Infinity,.001,1000])assert.ok(act(s,{type:'meal',resource:'food',amount:a}).error);
+ assert.ok(act(s,{type:'meal',resource:'rice',amount:1}).error);assertValid(n);
+});
+test('electric stove works with zero fuel and fuel fallback obeys preference and reserves',()=>{
+ let s=started({stove:1,battery:1,rice:1});s.inventory.fuel=0;
+ let n=unwrap(act(s,{type:'cook',recipe:'rice',batch:1}));assert.equal(n.inventory.power,7.5);assert.equal(n.inventory.cookedRice,1);assert.equal(n.inventory.rice,s.inventory.rice-1);assert.equal(n.energy,s.energy-5);
+ n=unwrap(act(n,{type:'meal',resource:'cookedRice',amount:.5}));assert.ok(act(n,{type:'preserve',resource:'cookedRice',amount:1}).error);
+ n.inventory.power=0;n.inventory.fuel=1;
+ let fuel=unwrap(act(n,{type:'cook',recipe:'rice',batch:.5}));assert.equal(fuel.inventory.fuel,.92);assert.equal(fuel.inventory.cookedRice,1.5);
+ fuel=unwrap(act(fuel,{type:'settings',key:'cookPower',value:'electric'}));assert.ok(act(fuel,{type:'cook',recipe:'rice'}).error);assertValid(fuel);
+});
+test('egg recipes accept all three egg stocks and cooking never duplicates nutritional food',()=>{
+ let s=started();s.inventory.eggs=.5;s.inventory.chickenEggs=1;s.inventory.duckEggs=.5;
+ const n=unwrap(act(s,{type:'cook',recipe:'egg'}));assert.equal(n.inventory.boiledEgg,2);assert.equal(n.inventory.eggs+n.inventory.chickenEggs+n.inventory.duckEggs,0);assert.equal(getDerived(n).totalFood,getDerived(s).totalFood);
+});
+test('manual care cannot duplicate automatic growth; insufficient supplies pause progress',()=>{
+ let s=unwrap(act(started(),{type:'plant',plot:0,crop:'greens'}));s=unwrap(act(s,{type:'care'}));assert.equal(s.animals.coop.cycle,1);assert.equal(s.plots[0].progress,1);assert.ok(act(s,{type:'care'}).error);
+ s=unwrap(advanceDay(s));assert.equal(s.animals.coop.cycle,1);assert.equal(s.plots[0].progress,1);
+ s.inventory.feed=0;s.inventory.water=4;s=unwrap(act(s,{type:'care'}));assert.equal(s.animals.coop.cycle,1);assert.equal(s.plots[0].progress,1);assertValid(s);
+});
+test('poultry hatch, grow and reproduce with capacity and breeding-sex constraints',()=>{
+ let s=started();s.inventory.feed=500;
+ for(let i=0;i<2;i++)s=unwrap(advanceDay(unwrap(act(s,{type:'mealPreset',mode:'balanced'}))));
+ assert.equal(s.inventory.chickenEggs,2);assert.ok(act(s,{type:'hatch',species:'coop',count:6}).error);
+ s=unwrap(act(s,{type:'hatch',species:'coop',count:2}));assert.equal(getAnimalInfo(s,'coop').total,5);
+ for(let i=0;i<14;i++){s.inventory.water=300;s=unwrap(advanceDay(unwrap(act(s,{type:'mealPreset',mode:'balanced'}))));assertValid(s);}
+ assert.equal(s.animals.coop.female,3);assert.equal(s.animals.coop.male,2);assert.equal(s.stats.births,2);
+ s=unwrap(act(s,{type:'butcher',species:'coop',sex:'male',count:2}));assert.equal(s.inventory.meat,4);assert.ok(!getAnimalInfo(s,'coop').canBreed);assert.ok(act(s,{type:'hatch',species:'coop',count:1}).error);
+});
+test('fish breeding leaves finite stock and catch removes exactly the selected adults',()=>{
+ let s=started({pond:1,tank:1,water:5,feed:2});s=unwrap(act(s,{type:'breedFish'}));assert.ok(act(s,{type:'breedFish'}).error);assert.equal(getAnimalInfo(s,'pond').total,14);
+ for(let i=0;i<6;i++)s=unwrap(advanceDay(unwrap(act(s,{type:'mealPreset',mode:'balanced'}))));assert.equal(s.animals.pond.adults,14);
+ s=unwrap(act(s,{type:'catch',count:12}));assert.equal(s.inventory.fish,12);assert.equal(s.animals.pond.adults,2);assert.ok(getAnimalInfo(s,'pond').canBreed);assert.ok(act(s,{type:'catch',count:3}).error);assertValid(s);
+});
+test('daily jobs enforce material costs, energy, once per day and permanent expansion caps',()=>{
+ let s=started();s.energy=40;s=unwrap(act(s,{type:'activity',id:'salvage'}));assert.equal(s.energy,22);assert.equal(s.inventory.materials,6);assert.ok(act(s,{type:'activity',id:'salvage'}).error);
+ s=unwrap(act(s,{type:'activity',id:'expandPlot'}));assert.equal(s.plots.length,4);assert.equal(s.inventory.materials,2);assert.equal(s.energy,2);
+ assert.ok(act(s,{type:'activity',id:'tidy'}).error);s=unwrap(act(s,{type:'activity',id:'rest'}));assert.equal(s.energy,27);assert.ok(act(s,{type:'activity',id:'rest'}).error);assertValid(s);
+});
+test('preservation conserves food value and uncooled fresh stock spoils only on fourth days',()=>{
+ let s=started();s.inventory.vegetables=4;s.settings.fridge=false;
+ const total=getDerived(s).totalFood;s=unwrap(act(s,{type:'preserve',resource:'vegetables',amount:2}));assert.equal(s.inventory.preserves,.8);assert.equal(getDerived(s).totalFood,total);
+ for(let i=0;i<3;i++)s=unwrap(advanceDay(unwrap(act(s,{type:'meal',resource:'food',amount:1}))));assert.equal(s.inventory.vegetables,2);
+ s=unwrap(advanceDay(unwrap(act(s,{type:'meal',resource:'food',amount:1}))));assert.equal(s.inventory.vegetables,1.5);assert.equal(s.inventory.preserves,.8);assertValid(s);
+});
+test('health zero ends play without hidden aid; only opted-in explicit rescue resumes it',()=>{
+ let s=unwrap(startGame(createGame({assistance:false})));s.health=5;s=unwrap(advanceDay(s));assert.equal(s.health,0);assert.equal(s.ended,true);assert.equal(s.stats.assists,0);assert.ok(advanceDay(s).error);assert.ok(act(s,{type:'rescue'}).error);assertValid(s);
+ s.assistance=true;s=unwrap(act(s,{type:'rescue'}));assert.equal(s.health,45);assert.equal(s.ended,false);assert.equal(s.stats.assists,1);assert.deepEqual(s.mealPlan,{});assertValid(s);
+});
+test('balanced meal preset reaches normal nutrition without exceeding stocks',()=>{
+ let s=started();s.inventory.vegetables=.1;s.inventory.boiledEgg=.2;s=unwrap(act(s,{type:'mealPreset',mode:'balanced'}));assert.ok(getMealPreview(s).nutrition>=1);assertValid(s);
+});
+
+test('all starter difficulties support deterministic 60-day gardening and meals without aid',()=>{
+ function run(difficulty){let s=createGame({difficulty,assistance:false});s=unwrap(startGame(unwrap(buyCart(s,getStarterCart(s)))));
+ for(let i=0;i<60;i++){
+  for(let p=0;p<s.plots.length;p++){
+   if(s.plots[p].crop&&s.plots[p].progress>=getCropDuration(s,s.plots[p].crop))s=unwrap(act(s,{type:'harvest',plot:p}));
+   if(!s.plots[p].crop)s=unwrap(act(s,{type:'plant',plot:p,crop:p===0?'fodder':'potatoes'}));
+  }
+  for(const [resource,recipe]of [['potatoes','potato'],['chickenEggs','egg']])if(s.inventory[resource]>=(recipe==='egg'?2:2)) {const r=act(s,{type:'cook',recipe,batch:recipe==='egg'?1:2});if(!r.error)s=r.state;}
+  s=unwrap(act(s,{type:'mealPreset',mode:'balanced'}));s=unwrap(advanceDay(s));assertValid(s);assert.equal(s.ended,false,`${difficulty} day ${i+1}`);
+ }
+ assert.equal(s.stats.assists,0);assert.equal(s.milestoneSeen,true);assert.equal(s.stats.days,60);assert.ok(s.health>=80);return s;}
+ for(const difficulty of ['cozy','balanced','hard'])assert.deepEqual(run(difficulty),run(difficulty));
 });

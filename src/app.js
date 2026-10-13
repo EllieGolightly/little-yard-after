@@ -1,16 +1,19 @@
-import { ITEMS, CATEGORIES, CROPS, RESOURCE_META, STARTER_CART } from './data.js';
-import { createGame, buyCart, startGame, advanceDay, act, getDerived, getForecast, getCropDuration } from './engine.js';
+import { initPwa, getPwaStatus, installApp } from './pwa.js';
+import { ITEMS, CATEGORIES, CROPS, RESOURCE_META, STARTER_CART, FOODS, RECIPES, ANIMAL_RULES, DIFFICULTIES } from './data.js';
+import { createGame, buyCart, startGame, advanceDay, act, getDerived, getForecast, getCropDuration, getMealPreview, getRecipePreview, getAnimalInfo, getStarterCart } from './engine.js';
 import { loadGame, saveGame, exportGame, importGame } from './storage.js';
 import { renderScene } from './scene.js';
+import { renderWelcome, renderVitals, renderTable, renderAnimals, renderSchedule, renderGoals, recipeQuote } from './life.js';
 
 const boot = loadGame();
 let state = boot.state || createGame();
-let view = state.phase === 'prep' ? 'shop' : 'home';
+let view = boot.state ? (state.phase === 'prep' ? 'shop' : 'home') : 'welcome';
+let pendingAnimal = null;
 let category = 'all', search = '', cart = {}, imported = null, saveStatus = boot.warning ? '存档需留意' : '进度自动保存';
 const app = document.querySelector('#app');
 const dialog = document.querySelector('#dialog');
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const number = v => Number(v || 0).toLocaleString('zh-CN',{maximumFractionDigits:1});
+const number = v => Number(v || 0).toLocaleString('zh-CN',{maximumFractionDigits:2});
 const money = v => `¥${number(v)}`;
 const byId = id => ITEMS.find(i => i.id === id);
 const cartTotal = () => Object.entries(cart).reduce((sum,[id,q])=>sum+(byId(id)?.price||0)*q,0);
@@ -61,13 +64,13 @@ function modal(title,body,footer='') {
 function navButton(id,label,symbol,small='') {return `<button class="nav-item ${view===id?'active':''}" data-action="nav" data-view="${id}">${icon(symbol)}<span>${label}</span>${small?`<small>${small}</small>`:''}</button>`;}
 function shell(content,aside) {
  const derived=getDerived(state), prep=state.phase==='prep';
- return `<aside class="sidebar"><a class="brand" href="#" data-action="nav" data-view="home"><span class="brand-mark">${icon('home')}</span><span>小院之后<small>A LITTLE LIFE, AFTER</small></span></a><div class="chapter"><span class="chapter-dot"></span>${prep?'序章 · 好好准备':`第一章 · 好好生活`}<small>${prep?'末日尚未来临':`宅家生活的第 ${state.day} 天`}</small></div><nav aria-label="游戏页面">${navButton('home','我的小院','home')}${navButton('shop','采购手册','shop',prep?'OPEN':'已打烊')}${navButton('inventory','储物间','box')}${navButton('journal','生活手记','book')}</nav><div class="sidebar-note">${icon('leaf')}<p>外面的世界变了。<br>这里的日子，<br>还可以慢慢过。</p><div class="tiny-flower">✳</div></div><div class="side-bottom"><button class="quiet" data-action="guide">${icon('help')} 新住户指南</button><button class="quiet" data-action="save-menu">${icon('settings')} 存档与设置</button><span class="save-indicator"><i></i>${saveStatus}</span><span class="version">小院之后 / v1.0</span></div></aside>
- <div class="workspace"><header class="topbar"><span class="breadcrumb">我的避风港 <span>/</span> ${{home:'我的小院',shop:'采购手册',inventory:'储物间',journal:'生活手记'}[view]}</span><div class="topbar-right"><span class="top-comfort">${icon('heart')} 舒适 ${number(derived.comfort)}</span><button class="quiet" data-action="export">${icon('down')}<span>导出存档</span></button><button class="quiet" data-action="guide" aria-label="新住户指南">${icon('help')}</button><button class="quiet" data-action="save-menu" aria-label="存档与设置">${icon('settings')}</button></div></header><div class="page-layout ${aside?'with-aside':''}"><main>${content}</main>${aside?`<aside class="right-panel" id="side-panel">${aside}</aside>`:''}</div>${prep&&view==='shop'?`<button class="mobile-cart" data-action="show-cart">${icon('shop')}<span>购物袋 ${cartCount()?`· ${cartCount()} 件`:"· 还没想好就看看基础清单"}</span><b>${money(cartTotal())}</b>${icon('arrow')}</button>`:''}${!prep?`<button class="mobile-turn" data-action="next-day">${icon('moon')}<span>第 ${state.day} 天 · ${esc(getForecast(state.day,1)[0].name)}</span><b>结束这一天</b>${icon('arrow')}</button>`:''}<footer class="page-footer"><span>一人 · 一屋 · 慢慢生活</span><span>每一次准备，都是对明天的照顾。</span></footer></div>`;
+ return `<aside class="sidebar"><a class="brand" href="#" data-action="nav" data-view="home"><span class="brand-mark">${icon('home')}</span><span>小院之后<small>A LITTLE LIFE, AFTER</small></span></a><div class="chapter"><span class="chapter-dot"></span>${prep?'序章 · 好好准备':`第一章 · 好好生活`}<small>${prep?'末日尚未来临':`宅家生活的第 ${state.day} 天`}</small></div><nav aria-label="游戏页面">${navButton('home','我的小院','home')}${navButton('shop','采购手册','shop',prep?'OPEN':'已打烊')}${navButton('table','今日餐桌','heart')}${navButton('inventory','储物间','box')}${navButton('journal','生活手记','book')}</nav><div class="sidebar-note">${icon('leaf')}<p>外面的世界变了。<br>这里的日子，<br>还可以慢慢过。</p><div class="tiny-flower">✳</div></div><div class="side-bottom"><button class="quiet" data-action="guide">${icon('help')} 新住户指南</button><button class="quiet" data-action="save-menu">${icon('settings')} 存档与设置</button><span class="save-indicator"><i></i>${saveStatus}</span><span class="version">小院之后 / v2.0</span></div></aside>
+ <div class="workspace"><header class="topbar"><span class="breadcrumb">我的避风港 <span>/</span> ${{home:'我的小院',shop:'采购手册',inventory:'储物间',journal:'生活手记',table:'今日餐桌',welcome:'新的生活'}[view]}</span><div class="topbar-right"><span class="top-comfort">${icon('heart')} 舒适 ${number(derived.comfort)}</span><button class="quiet" data-action="export">${icon('down')}<span>导出存档</span></button><button class="quiet" data-action="guide" aria-label="新住户指南">${icon('help')}</button><button class="quiet" data-action="save-menu" aria-label="存档与设置">${icon('settings')}</button></div></header><div class="page-layout ${aside?'with-aside':''}"><main>${content}</main>${aside?`<aside class="right-panel" id="side-panel">${aside}</aside>`:''}</div>${prep&&view==='shop'?`<button class="mobile-cart" data-action="show-cart">${icon('shop')}<span>购物袋 ${cartCount()?`· ${cartCount()} 件`:"· 还没想好就看看基础清单"}</span><b>${money(cartTotal())}</b>${icon('arrow')}</button>`:''}${!prep&&view!=='welcome'?`<button class="mobile-turn" data-action="next-day">${icon('moon')}<span>第 ${state.day} 天 · ${esc(getForecast(state.day,1)[0].name)}</span><b>${state.ended?'查看本局总结':'结束这一天'}</b>${icon('arrow')}</button>`:''}<footer class="page-footer"><span>一人 · 一屋 · 慢慢生活</span><span>每一次准备，都是对明天的照顾。</span></footer></div>`;
 }
 function resourceStrip() {
  const d=getDerived(state);
  return `<div class="resource-strip">${[
- ['box','食物储备',`${number(d.foodDays)}<small> 天</small>`,'把好吃的留下来'],
+ ['box','食物储备',`${number(d.foodDays)}<small> 天</small>`,'按正常食量估算，含生食材'],
  ['water','生活用水',`${number(state.inventory.water)}<small> / ${number(d.waterCapacity)} L</small>`,'饮用、种植与喂养'],
  ['bolt','蓄电余量',`${number(state.inventory.power)}<small> / ${number(d.powerCapacity)}</small>`,'阳光，也可以存起来'],
  ['heart','家的舒适',`${number(d.comfort)}<small> 分</small>`,'日子不只有生存']
@@ -75,7 +78,7 @@ function resourceStrip() {
 }
 function hero(mode='shop') {
  const prep=state.phase==='prep';
- return `<section class="hero ${mode==='home'?'home-hero':''}"><div class="hero-copy"><div class="eyebrow"><span></span>${prep?'末日前的采购时光':'属于你的小小世界'}</div><h1>${prep?'把以后，准备成<br>喜欢的日子。':`今天，也好好生活。`}</h1><p>${prep?'存一点食物，种一点希望。<br>从一张采购单开始，安顿未来的自己。':'菜在生长，水箱在等待下一场雨。<br>关上院门，把日子过得有声有色。'}</p><div class="hero-tag">${icon('leaf')}${prep?'不用赶时间，准备好了再出发。':`第 ${state.day} 天 · ${esc(getForecast(state.day,1)[0].name)} · ${getForecast(state.day,1)[0].temperature}°C`}</div></div><div class="scene-wrap">${renderScene(state,{compact:mode==='shop'})}<span class="scene-caption">${prep?'你的院子，会随着准备慢慢丰盛':'点击小院里的区域，照看你的生活'}</span></div></section>`;
+ return `<section class="hero ${mode==='home'?'home-hero':''}"><div class="hero-copy"><div class="eyebrow"><span></span>${prep?'末日前的采购时光':'属于你的小小世界'}</div><h1>${prep?'把以后，准备成<br>喜欢的日子。':`今天，也好好生活。`}</h1><p>${prep?'存一点食物，种一点希望。<br>从一张采购单开始，安顿未来的自己。':'菜在生长，水箱在等待下一场雨。<br>关上院门，把日子过得有声有色。'}</p><div class="hero-tag">${icon('leaf')}${prep?'先过好 30 天，之后可以一直生活。':`第 ${state.day} 天 · ${esc(getForecast(state.day,1)[0].name)} · ${getForecast(state.day,1)[0].temperature}°C`}</div></div><div class="scene-wrap">${renderScene(state,{compact:mode==='shop'})}<span class="scene-caption">${prep?'你的院子，会随着准备慢慢丰盛':'点击小院里的区域，照看你的生活'}</span></div></section>`;
 }
 function productCard(item) {
  const qty=cart[item.id]||0, have=owned(item), maxed=item.max && have+qty>=item.max;
@@ -101,41 +104,47 @@ function facilityCard(id) {
  const i=byId(id);if(!i)return '';
  const has=state.facilities[id]>0;
  const cycle={coop:2,ducks:3,pond:7}[id];
- return `<div class="facility ${has?'':'unbuilt'}"><span>${esc(i.icon)}</span><div><b>${esc(i.name)}</b><p>${has?esc(i.detail):'尚未安置'}</p>${has&&cycle&&state.phase==='survival'?`<small class="animal-progress">本轮照料 ${state.livestock[id]} / ${cycle} 天 · ${state.settings.autoCare?'每天自动照料':'等待手动照料'}</small>`:''}</div>${pill(has?'已安置':'未购入',has?'green':'')}</div>`;
+ return `<div class="facility ${has?'':'unbuilt'}"><span>${esc(i.icon)}</span><div><b>${esc(i.name)}</b><p>${has?esc(i.detail):'尚未安置'}</p></div>${pill(has?'已安置':'未购入',has?'green':'')}</div>`;
 }
 function home() {
- return `${hero('home')}${resourceStrip()}${state.phase==='prep'?`<div class="notice">${icon('leaf')}<div><b>先把家准备好，再开始新的日子。</b><span>购入的设施会出现在院子里。种植与生产将在关门后开始。</span></div><button class="secondary" data-action="nav" data-view="shop">继续采购 ${icon('arrow')}</button></div>`:''}${gardens()}<div class="two-panels"><section class="panel" id="water-section"><div class="section-heading"><h2>水与电，心里的底气</h2>${icon('bolt')}</div>${['rain','filter','tank','solar','battery','generator'].map(facilityCard).join('')}<div class="toggle-row"><label for="generator-setting">允许燃油发电<small>按需补电，会消耗储备燃料</small></label><input class="switch" id="generator-setting" type="checkbox" data-setting="generator" ${state.settings.generator?'checked':''} ${state.phase==='prep'||!state.facilities.generator?'disabled':''} /></div></section><section class="panel" id="animals-section"><div class="section-heading"><h2>院子里的小住户</h2>${icon('heart')}</div>${['coop','ducks','pond'].map(facilityCard).join('')}<div class="toggle-row"><label for="care-setting">每天自动浇水与喂养<small>水或饲料不够时，生产会暂停</small></label><input class="switch" id="care-setting" type="checkbox" data-setting="autoCare" ${state.settings.autoCare?'checked':''} ${state.phase==='prep'?'disabled':''}/></div>${!state.settings.autoCare&&state.phase==='survival'?`<button class="secondary full manual-care" data-action="care" ${state.lastCareDay===state.day?'disabled':''}>${state.lastCareDay===state.day?'今天已经照料过了':'现在给小院浇水、喂食'}</button>`:''}<div class="home-kitchen" id="home-section"><span>🍲</span><h3>好好吃饭，就是好好生活</h3><p>有炉具时，用 2 份蔬菜、1 份蛋或鱼、1 L 燃料，做出 6 份耐储熟食；3 天内舒适度 +10。</p><button class="secondary full" data-action="cook" ${state.phase==='prep'||!state.facilities.stove||state.lastCookDay===state.day?'disabled':''}>${state.lastCookDay===state.day?'今天已经好好吃过饭':!state.facilities.stove?'还没有安置灶台':'今天做一锅热饭'}</button></div>${state.facilities.fridge?`<div class="toggle-row"><label for="fridge-setting">让冰箱保持运行<small>${esc(byId('fridge').detail)}</small></label><input class="switch" id="fridge-setting" type="checkbox" data-setting="fridge" ${state.settings.fridge?'checked':''} ${state.phase==='prep'?'disabled':''}/></div>`:''}</section></div>`;
+ const prep=state.phase==='prep';
+ return `${hero('home')}${prep?'':renderVitals(state)}${resourceStrip()}${prep?`<div class="notice">${icon('leaf')}<div><b>先过好 30 天，再把小院经营成长久的家。</b><span>采购完毕后，还能种菜、繁育、做饭，以及使用材料扩建设施。</span></div><button class="secondary" data-action="nav" data-view="shop">继续采购 →</button></div>`:`<div class="notice meal-notice"><span class="notice-emoji">🍚</span><div><b>${Object.keys(state.mealPlan).length?'今日餐桌已安排':'今天的餐桌，还等着你'}</b><span>${Object.keys(state.mealPlan).length?`共 ${Math.round(getMealPreview(state).nutrition*100)}% 正常食量，结束一天时食用。`:'先选吃什么、吃多少。也可以沿用昨天的搭配。'}</span></div><button class="primary" data-action="nav" data-view="table">去餐桌看看 →</button></div>`}${gardens()}${renderAnimals(state)}${renderSchedule(state)}<section class="panel" id="water-section"><div class="section-heading"><h2>水与电，心里的底气</h2>${icon('bolt')}</div><div class="utilities-grid">${['rain','filter','tank','well','solar','battery','generator'].map(facilityCard).join('')}</div><div class="toggle-row"><label for="generator-setting">允许燃油备用发电<small>蓄电低于 3 kWh 时，使用 1 L 燃料补电</small></label><input class="switch" id="generator-setting" type="checkbox" data-setting="generator" ${state.settings.generator?'checked':''} ${prep||!state.facilities.generator?'disabled':''}></div>${state.facilities.fridge?`<div class="toggle-row"><label for="fridge-setting">保持冰箱运行<small>每晚需 1.2 kWh 电；没有电时，鲜食按固定日期损耗</small></label><input class="switch" id="fridge-setting" type="checkbox" data-setting="fridge" ${state.settings.fridge?'checked':''} ${prep?'disabled':''}></div>`:''}</section>${renderGoals(state)}`;
 }
 function dayPanel() {
- const forecasts=getForecast(state.day,3),d=getDerived(state);
- return `<section class="today-card"><span class="eyebrow">日子一页页翻过</span><div class="day-number">${String(state.day).padStart(2,'0')}<span>天</span></div><h3>${state.day===1?'新的生活，从今天开始。':'院门以内，生活照常。'}</h3><p>完成今天的安排后，再让时间前进。</p><button class="primary full" data-action="next-day">${icon('moon')} 过完这一天 ${icon('arrow')}</button><small>今日预计消耗 ${d.dailyNeeds.food} 份食物 · ${d.dailyNeeds.water} L 水</small></section><section class="forecast-card"><div class="section-heading"><h3>未来三天天气</h3>${icon('sun')}</div>${forecasts.map((f,n)=>`<div class="forecast-row"><span>${n===0?'今天':n===1?'明天':'后天'}<small>第 ${state.day+n} 天</small></span><span class="weather-icon">${esc(f.icon)}</span><b>${esc(f.name)}<small>${f.temperature}°C · 日照 ${Math.round(f.sun*100)}%<br>${f.rain?`雨量 ${f.rain} mm`:'无雨'}</small></b></div>`).join('')}<p class="fine-print">晴天蓄电，雨天存水。提前安排，心里不慌。</p></section><section class="milestone-card"><span class="eyebrow">慢慢扎下根来</span><h3>${state.day>30?'这里，已经是家了':'在小院生活 30 天'}</h3><div class="progress"><span style="width:${Math.min(100,(state.day-1)/30*100)}%"></span></div><p>已度过 ${state.day-1} 天 · 收获 ${state.stats.harvests} 次</p>${state.stats.assists?`<small>收到应急补给 ${state.stats.assists} 次</small>`:''}</section>`;
+ const forecasts=getForecast(state.day,3),d=getDerived(state),m=getMealPreview(state);
+ return `<section class="today-card"><span class="eyebrow">先平安度过 30 天 · 然后慢慢生活</span><div class="day-number">${String(state.day).padStart(2,'0')}<span>天</span></div><div class="daily-body"><span>健康 <b>${number(state.health)}</b></span><span>精力 <b>${number(state.energy)}</b></span></div><h3>${state.ended?'这一段生活，暂时停在这里。':m.nutrition?'今天，也记得好好吃饭。':'今天的餐桌还没有安排。'}</h3><p>${state.ended?'小院与存档都保留着，可以回看记录。':`今日食量 ${Math.round(m.nutrition*100)}% · 饮食影响健康 ${m.healthChange>0?'+':''}${m.healthChange}`}</p><button class="secondary full" data-action="nav" data-view="table">🍚 安排今日餐桌</button><button class="primary full" data-action="next-day">${icon('moon')} ${state.ended?'查看本局总结':'过完这一天'} ${icon('arrow')}</button><small>预计生活用水 ${number(d.dailyNeeds.water)} L · 饲料 ${number(d.dailyNeeds.feed)} 份</small></section><section class="forecast-card"><div class="section-heading"><h3>未来三天天气</h3>${icon('sun')}</div>${forecasts.map((f,n)=>`<div class="forecast-row"><span>${n===0?'今天':n===1?'明天':'后天'}<small>第 ${state.day+n} 天</small></span><span class="weather-icon">${esc(f.icon)}</span><b>${esc(f.name)}<small>${f.temperature}°C · 日照 ${Math.round(f.sun*100)}%<br>${f.rain?`雨量 ${f.rain} mm`:'无雨'}</small></b></div>`).join('')}<p class="fine-print">晴天蓄电，雨天存水。今天烹饪使用的是现有蓄电。</p></section><section class="milestone-card"><span class="eyebrow">${DIFFICULTIES.find(x=>x.id===state.difficulty).name}</span><h3>${state.milestoneSeen?'这里，已经是家了':'在小院生活 30 天'}</h3><div class="progress"><span style="width:${Math.min(100,state.stats.days/30*100)}%"></span></div><p>已生活 ${state.stats.days} 天 · 收获 ${state.stats.harvests} 次<br>新生命 ${state.stats.births} 只 · 做饭 ${state.stats.mealsCooked} 次</p><small>援助${state.assistance?'已开启':'已关闭'} · 使用 ${state.stats.assists} 次</small>${state.assistance?`<button class="text-button aid-button" data-action="${state.ended?'rescue':'aid'}">${state.ended?'申请援助休养':'食水不足？申请应急补给'}</button>`:''}</section>`;
 }
 function inventory() {
- return `${pageHeading('家里有这些，就很安心。','一格一格存下的，是未来的每一个普通日子。')}${resourceStrip()}<section class="panel"><div class="section-heading"><h2>储备一览</h2>${pill('每天结算 · 实时记录')}</div><div class="inventory-grid">${Object.entries(RESOURCE_META).filter(([key])=>key in state.inventory).map(([key,m])=>`<div class="inventory-item"><span>${esc(m.icon)}</span><div><h3>${esc(m.name)}</h3><strong>${number(state.inventory[key])}<small> ${esc(m.unit)}</small></strong></div></div>`).join('')}</div></section><section class="panel"><div class="section-heading"><h2>已经安置好的设施</h2><span class="muted">家的每一部分，都有来处</span></div><div class="owned-grid">${ITEMS.filter(i=>i.kind==='facility'&&state.facilities[i.id]).map(i=>`<article><span>${esc(i.icon)}</span><h3>${esc(i.name)} ${state.facilities[i.id]>1?`×${state.facilities[i.id]}`:''}</h3><p>${esc(i.detail)}</p></article>`).join('')||'<p class="muted">家里还有很多空位，等你慢慢添置。</p>'}</div></section>`;
+ return `${pageHeading('家里有这些，就很安心。','一格一格存下的，是未来的每一个普通日子。')}${resourceStrip()}<section class="panel"><div class="section-heading"><h2>储备一览</h2>${pill('每天结算 · 实时记录')}</div><div class="inventory-grid">${Object.entries(RESOURCE_META).filter(([key])=>state.inventory[key]>0||['food','water','feed','fuel','seeds','power','materials'].includes(key)).map(([key,m])=>`<div class="inventory-item"><span>${esc(m.icon)}</span><div><h3>${esc(m.name)}</h3><strong>${number(state.inventory[key])}<small> ${esc(m.unit)}</small></strong></div></div>`).join('')}</div></section><section class="panel"><div class="section-heading"><h2>已经安置好的设施</h2><span class="muted">家的每一部分，都有来处</span></div><div class="owned-grid">${ITEMS.filter(i=>i.kind==='facility'&&state.facilities[i.id]).map(i=>`<article><span>${esc(i.icon)}</span><h3>${esc(i.name)} ${state.facilities[i.id]>1?`×${state.facilities[i.id]}`:''}</h3><p>${esc(i.detail)}</p></article>`).join('')||'<p class="muted">家里还有很多空位，等你慢慢添置。</p>'}</div></section>`;
 }
 function journal() {
  return `${pageHeading('那些平凡的日子，值得记下。','第一棵菜、第一枚蛋，和末日里一碗热腾腾的饭。')}<div class="journal-banner">${icon('book')}<div><h3>小院生活手记</h3><p>度过 ${Math.max(0,state.day-1)} 天 · 收获 ${state.stats.harvests} 次 · 应急补给 ${state.stats.assists} 次</p></div><button class="secondary" data-action="export">把回忆存下来 ${icon('down')}</button></div><div class="journal-list">${[...state.logs].map(l=>`<article class="journal-entry"><span class="journal-date">${l.day?`DAY ${String(l.day).padStart(2,'0')}`:'序章'}</span><div><h3>${esc(l.title)}</h3><p>${esc(l.text)}</p></div><span class="journal-stamp">${l.kind==='harvest'?'✳':'✧'}</span></article>`).join('')||'<div class="empty-state">故事还没开始，先为自己添置一点东西吧。</div>'}</div>`;
 }
 function render() {
- const content={shop,home,inventory,journal}[view]();
- const aside=state.phase==='prep'?(view==='shop'?cartPanel():`<section class="return-card"><span>🌱</span><h2>小院慢慢丰盛起来</h2><p>准备金还有 ${money(state.money)}，继续挑些未来用得上的东西吧。</p><button class="primary full" data-action="nav" data-view="shop">翻开采购手册 ${icon('arrow')}</button><button class="secondary full" data-action="start">准备好了，关上院门</button></section>`):dayPanel();
+ const content={shop,home,inventory,journal,table:()=>state.phase==='prep'?`${pageHeading('未来的餐桌，也从准备开始。','关上院门后，可以在这里搭配每一天的食物。')}${renderGoals(state)}`:renderTable(state),welcome:()=>renderWelcome(state)}[view]();
+ const aside=view==='welcome'?'':state.phase==='prep'?(view==='shop'?cartPanel():`<section class="return-card"><span>🌱</span><h2>小院慢慢丰盛起来</h2><p>准备金还有 ${money(state.money)}，继续挑些未来用得上的东西吧。</p><button class="primary full" data-action="nav" data-view="shop">翻开采购手册 ${icon('arrow')}</button><button class="secondary full" data-action="start">准备好了，关上院门</button></section>`):dayPanel();
  app.innerHTML=shell(content,aside);
 }
 function guide() {
- modal('欢迎，未来的小院主人。',`<p class="lead">你有 30,000 元准备金、一栋小房子，以及足够慢慢挑选的时间。</p><div class="guide-step"><b>01</b><div><h3>为未来采购</h3><p>商品写明了价格、用途和每日消耗。可以多次结算，设备自动安置；购物车里的东西尚未买入。基础清单提供一套水电与种植起步方案。</p></div></div><div class="guide-step"><b>02</b><div><h3>准备好了，就关上院门</h3><p>此后无法继续购物，剩余的钱会留作纪念。没有准备倒计时，可以先看检查提示再出发。</p></div></div><div class="guide-step"><b>03</b><div><h3>照顾一个能长久生活的家</h3><p>点击空菜地播种，成熟后手动收获。默认每天自动照料作物与动物。每天按“过完这一天”才结算消耗、发电、集雨与生产，离开页面不会流逝时间。</p></div></div><div class="guide-step"><b>04</b><div><h3>给日子留一点余地</h3><p>天气和生产有固定规则，三日预报可提前安排。缺水缺粮时会收到少量应急补给，并记入手记；作物和动物暂停生产，方便你继续调整。度过 30 天后可以一直生活下去。</p></div></div><p class="soft-note">进度保存在当前浏览器。换设备、清理浏览器前，请导出存档；在另一个浏览器导入即可接着玩。</p>`,`<button class="primary" data-action="close">知道啦，慢慢来 ${icon('leaf')}</button>`);
+ modal('欢迎回家，日子慢慢过。',`<p class="lead">先平安度过 30 天，再慢慢经营。健康降至 0 时结束这一段生活，存档不会被删除。</p><div class="guide-step"><b>01</b><div><h3>预算与准备</h3><p>安心囤货 5 万、精打细算 3 万、紧日子 2 万。应急援助可独立开关，只在新开局设置。采购没有倒计时；开始生活后可利用材料扩建。</p></div></div><div class="guide-step"><b>02</b><div><h3>今天吃什么，由你决定</h3><p>去餐桌选食物和份量，支持小数份量。结束一天时统一吃饭。生米、土豆、蛋和肉需要先烹饪。两用灶台可选电或燃料；餐桌预留的食物不会被做菜挪用。</p></div></div><div class="guide-step"><b>03</b><div><h3>照料小院，也照料自己</h3><p>食量不足会降低健康，缺水另扣健康；吃饱、搭配丰富和休息帮助恢复。精力用于种植、做饭、繁育和扩建，每晚恢复。水电、作物、幼崽和动物继续按设置自动照料。</p></div></div><div class="guide-step"><b>04</b><div><h3>留种，长大，再作选择</h3><p>鸡鸭需要公母种禽；自产种蛋可吃或孵化，幼崽固定天数后长大。鱼池至少留 2 条成鱼可繁育。圈舍容量和食水消耗随数量变化；也可以处理成年禽类或捕捞获得食材。</p></div></div><p class="soft-note">低储备时可主动申请已开启的援助，计入记录；援助不会替你吃饭。旧存档自动升级且保留初次升级前的浏览器备份。离线期间时间不会流逝。</p>`,`<button class="primary" data-action="close">知道啦，慢慢来 ${icon('leaf')}</button>`);
 }
 function startConfirm() {
  if(cartCount()){toast('购物袋里还有东西，先采购安置，或清空后再关门。');view='shop';render();return;}
  const d=getDerived(state);
  modal('把院门关上，把生活留下。',`<p>准备金还剩 <b>${money(state.money)}</b>。关门后商店将停止营业，种植、养殖与每日生活开始运转。</p><div class="confirm-checks">${d.checks.map(c=>`<p class="${c.ok?'positive':'muted'}">${c.ok?'✓':'○'} ${esc(c.label)} <small>${esc(c.hint)}</small></p>`).join('')}</div><p class="soft-note">${d.checks.every(c=>c.ok)?'看起来，已经有了好好生活的底气。':'还有一些准备尚未完成。你可以回去补充，也可以带着现有的东西开始。'}</p>`,`<button class="secondary" data-action="close">再看看</button><button class="primary" data-action="confirm-start">开始宅家生活 ${icon('arrow')}</button>`);
 }
-function nextDay() {
- const before=state, result=advanceDay(state);
- if(result.error){toast(result.error);return;}
+function ending() {
+ modal('这一段生活，暂时停在这里。',`<p class="lead">你在小院生活了 ${state.stats.days} 天。</p><p>收获 ${state.stats.harvests} 次，做饭 ${state.stats.mealsCooked} 次，迎接 ${state.stats.births} 个新生命。健康已经耗尽，院子和存档都还在。</p><p class="soft-note">${state.assistance?'这一局开启了援助，可以申请休养后继续，会记录援助次数。':'这一局关闭了援助。可以导出这段生活的记录，再尝试另一种准备。'}</p>`,`<button class="secondary" data-action="export">导出这段记录</button>${state.assistance?'<button class="primary" data-action="rescue">援助休养后继续</button>':'<button class="primary" data-action="reset">开始新的小院</button>'}`);
+}
+function nextDay(confirmed=false) {
+ const invalid=document.querySelector('[data-meal]:invalid');if(invalid){invalid.reportValidity();toast('请先把食用量调整为库存内的非负数，最多两位小数。');return;}
+ if(state.ended){ending();return;}
+ const planned=getMealPreview(state);
+ if(!confirmed&&planned.nutrition<.9){modal(planned.nutrition===0?'今天还没有安排食物。':'今天，准备省着吃一点。',`<p>餐桌上是正常食量的 <b>${Math.round(planned.nutrition*100)}%</b>，饮食预计让健康 <b>${planned.healthChange}</b>。可以回去搭配，也可以按这个安排过一天。</p><p class="soft-note">应急援助不会替你吃饭。持续吃得不足，会逐渐耗尽健康。</p>`,'<button class="secondary" data-action="back-table">去安排餐桌</button><button class="primary" data-action="confirm-day">就按这个安排过一天</button>');return;}
+ const before=state,result=advanceDay(state);if(result.error){toast(result.error);return;}
  state=result.state;persist();render();
- const changes=Object.entries(RESOURCE_META).filter(([k])=>Math.abs((state.inventory[k]||0)-(before.inventory[k]||0))>.01).map(([k,m])=>{const diff=state.inventory[k]-before.inventory[k];return `<div class="day-change"><span>${esc(m.icon)} ${esc(m.name)}</span><b class="${diff>0?'positive':'used'}">${diff>0?'+':''}${number(diff)} ${esc(m.unit)}</b></div>`}).join('');
- const entries=[{title:result.report.title,text:[result.report.text,...result.report.events].join('\n')}];
- modal(state.day===31?'三十天过去，这里已经是家。':'晚安，小院。',`<p class="lead">第 ${before.day} 天 · ${esc(getForecast(before.day,1)[0].name)}<br><small>明天是第 ${state.day} 天，新的生活继续。</small></p><div class="day-changes">${changes||'<p>储备没有变化。</p>'}</div><div class="report-entries">${entries.map(l=>`<p><b>${esc(l.title)}</b><span>${esc(l.text)}</span></p>`).join('')}</div>${state.day===31?'<p class="soft-note">这一页结束了，但日子没有。你可以继续照看小院，等下一批菜长大。</p>':''}`,`<button class="primary" data-action="close">${state.day===31?'继续过我的小日子':'迎接新的一天'} ${icon('sun')}</button>`);
+ const changes=Object.entries(result.report.changes).filter(([,q])=>Math.abs(q)>=.01).map(([k,q])=>`<div class="day-change"><span>${RESOURCE_META[k].icon} ${RESOURCE_META[k].name}</span><b class="${q>0?'positive':'used'}">${q>0?'+':''}${number(q)} ${RESOURCE_META[k].unit}</b></div>`).join('');
+ modal(result.report.ended?'小院的这一页，暂时停下。':result.report.milestone?'三十天过去，这里已经是家。':'晚安，小院。',`<p class="lead">第 ${before.day} 天 · ${result.report.weather.name}<br><small>健康 ${number(state.health)}（${result.report.healthChange>0?'+':''}${result.report.healthChange}） · 精力 ${number(state.energy)}（+${number(result.report.energyChange)}）</small></p><div class="day-changes">${changes||'<p>物资没有变化。</p>'}</div><div class="report-entries"><p><b>${esc(result.report.title)}</b><span>${esc([result.report.text,...result.report.events].join('\n'))}</span></p></div>${result.report.milestone?'<p class="soft-note">30 天目标已完成。明天仍然可以继续经营，看看下一批幼崽和作物会长成什么样。</p>':''}`,`<button class="primary" data-action="${state.ended?'ending':'close'}">${state.ended?'看看这段生活的总结':result.report.milestone?'继续过我的小日子':'迎接新的一天'} ${icon('sun')}</button>`);
 }
 function exportSave() {
  const url=URL.createObjectURL(new Blob([exportGame(state)],{type:'application/json'}));
@@ -153,30 +162,61 @@ document.addEventListener('click',event=>{
  case 'add':{const i=byId(id);if(!i)return;const max=i.max||999;if((i.kind==='facility'?owned(i):0)+(cart[id]||0)>=max){toast('这个已经准备足够啦。');return;}cart[id]=(cart[id]||0)+1;render();break;}
  case 'minus':if(cart[id]>1)cart[id]--;else delete cart[id];render();break;
  case 'clear-cart':cart={};render();break;
- case 'starter':cart=Object.fromEntries(Object.entries(STARTER_CART).map(([key,q])=>[key,Math.max(0,q-(byId(key)?.kind==='facility'?(state.facilities[key]||0):0))]).filter(([,q])=>q>0));render();toast('基础清单已装入购物袋，可以按喜好增减。');break;
+ case 'starter':cart=Object.fromEntries(Object.entries(getStarterCart(state)).map(([key,q])=>[key,Math.max(0,q-(byId(key)?.kind==='facility'?(state.facilities[key]||0):0))]).filter(([,q])=>q>0));render();toast('基础清单已装入购物袋，可以按喜好增减。');break;
  case 'checkout':if(commit(buyCart(state,cart),'东西都带回家了。小院又踏实了一点。')){cart={};render();}break;
  case 'start':startConfirm();break;
  case 'confirm-start':dialog.close();if(commit(startGame(state))){view='home';render();window.scrollTo({top:0,behavior:'instant'});}break;
  case 'plant':commit(act(state,{type:'plant',plot:Number(button.dataset.plot),crop:button.dataset.crop}));break;
  case 'harvest':commit(act(state,{type:'harvest',plot:Number(button.dataset.plot)}));break;
  case 'care':commit(act(state,{type:'care'}));break;
- case 'cook':commit(act(state,{type:'cook'}));break;
+ case 'cook':view='table';render();break;
  case 'next-day':nextDay();break;
+ case 'confirm-day':dialog.close();nextDay(true);break;
+ case 'back-table':dialog.close();view='table';render();window.scrollTo({top:0,behavior:'instant'});break;
+ case 'ending':ending();break;
+ case 'aid':commit(act(state,{type:'aid'}));break;
+ case 'rescue':if(commit(act(state,{type:'rescue'})))dialog.close();break;
+ case 'meal-preset':commit(act(state,{type:'mealPreset',mode:button.dataset.mode}));break;
+ case 'meal-adjust':{const k=button.dataset.resource,q=Math.max(0,Math.min(state.inventory[k],Math.round(((state.mealPlan[k]||0)+Number(button.dataset.delta))*100)/100));commit(act(state,{type:'meal',resource:k,amount:q}));break;}
+ case 'cook-recipe':{const batch=Number(button.closest('.recipe-card').querySelector('.recipe-batch').value);commit(act(state,{type:'cook',recipe:button.dataset.recipe,batch}));break;}
+ case 'preserve':commit(act(state,{type:'preserve',resource:document.querySelector('#preserve-resource').value,amount:Number(document.querySelector('#preserve-amount').value)}));break;
+ case 'activity':commit(act(state,{type:'activity',id}));break;
+ case 'hatch':commit(act(state,{type:'hatch',species:button.dataset.species,count:Number(button.closest('.animal-card').querySelector('.hatch-count').value)}));break;
+ case 'breed-fish':commit(act(state,{type:'breedFish'}));break;
+ case 'animal-harvest':{const species=button.dataset.species,card=button.closest('.animal-card'),count=Number(card.querySelector('.animal-quantity').value),sex=card.querySelector('.animal-sex')?.value;const group=state.animals[species],available=species==='pond'?group.adults:group[sex];if(!Number.isInteger(count)||count<1||count>available){toast('请填写不超过现有成年动物的整数数量。');break;}pendingAnimal={type:species==='pond'?'catch':'butcher',species,sex,count};const r=ANIMAL_RULES[species];const future=species==='pond'?group.adults-count>=2:(sex==='female'?group.female-count>0&&group.male>0:group.male-count>0&&group.female>0);modal(species==='pond'?'把这次捕获带进厨房。':'为今天的餐桌作一个选择。',`<p>将${species==='pond'?'捕捞':'处理'} ${count} 只${sex==='female'?'母':sex==='male'?'公':''}${r.name}，得到 ${count*r.meat} 份${species==='pond'?'鲜鱼':'禽肉'}，消耗 ${Math.min(35,4+count*2)} 精力。</p><p class="soft-note">${future?'剩余种群仍满足繁育条件。':'这次处理后，种群将无法继续繁育。可以减少数量，留下种禽或种鱼。'}食材需要烹饪后才能上桌。</p>`,'<button class="secondary" data-action="close">再想想</button><button class="primary" data-action="confirm-animal">确认获得食材</button>');break;}
+ case 'confirm-animal':if(pendingAnimal&&commit(act(state,pendingAnimal))){pendingAnimal=null;dialog.close();}break;
+ case 'begin-run':{const difficulty=document.querySelector('input[name="difficulty"]:checked')?.value||'balanced',assistance=document.querySelector('#new-assistance').checked;state=createGame({difficulty,assistance});cart={};view='shop';category='all';search='';persist();render();window.scrollTo({top:0,behavior:'instant'});break;}
+
  case 'close':dialog.close();break;
  case 'guide':guide();break;
  case 'export':exportSave();break;
- case 'save-menu':modal('把这段日子，好好收着。',`<p>小院会自动保存在当前浏览器，离线时间不会推进游戏。导出文件可以备份进度，也可以带到另一台设备。</p><div class="save-actions"><button class="secondary" data-action="export">${icon('down')} 导出当前存档</button><button class="secondary" data-action="import">${icon('upload')} 导入已有存档</button></div><div class="reset-area"><h3>想从头布置另一个小院？</h3><p>重新开始会替换当前进度，建议先导出存档。</p><button class="text-button danger" data-action="reset">重新开始</button></div>`);break;
+ case 'install':installApp().then(toast).catch(()=>toast('请从浏览器菜单选择添加到主屏幕。'));break;
+ case 'save-menu':modal('把这段日子，好好收着。',`<p>小院会自动保存在当前浏览器，离线时间不会推进游戏。导出文件可以备份进度，也可以带到另一台设备。</p><div class="pwa-info"><h3>把小院放到主屏幕</h3><p data-pwa-status>${esc(getPwaStatus())}</p><button class="secondary" data-action="install">安装到手机 / 主屏幕</button><p>iPhone：Safari 分享 → 添加到主屏幕。安卓：浏览器菜单 → 安装应用。存档保存在当前设备；换设备请导出后导入。</p></div><div class="save-actions"><button class="secondary" data-action="export">${icon('down')} 导出当前存档</button><button class="secondary" data-action="import">${icon('upload')} 导入已有存档</button></div><div class="reset-area"><h3>想从头布置另一个小院？</h3><p>重新开始会替换当前进度，建议先导出存档。</p><button class="text-button danger" data-action="reset">重新开始</button></div>`);break;
  case 'import':document.querySelector('#save-file').click();break;
  case 'confirm-import':if(imported){state=imported;imported=null;cart={};view=state.phase==='prep'?'shop':'home';const saved=persist();render();dialog.close();if(saved)toast('熟悉的小院，欢迎回来。');}break;
  case 'reset':modal('重新开始一段生活？','<p>当前小院将被新的准备期替换。如果还想保留它，可以先导出存档。</p>','<button class="secondary" data-action="export">先导出存档</button><button class="danger-button" data-action="confirm-reset">确认重新开始</button>');break;
- case 'confirm-reset':state=createGame();cart={};view='shop';category='all';search='';if(persist())toast('新的小院，新的期待。');render();dialog.close();break;
+ case 'confirm-reset':view='welcome';render();dialog.close();window.scrollTo({top:0,behavior:'instant'});break;
  }
 });
 document.addEventListener('change',event=>{
- if(event.target.dataset.setting)commit(act(state,{type:'settings',key:event.target.dataset.setting,value:event.target.checked}));
+ if(event.target.dataset.setting)commit(act(state,{type:'settings',key:event.target.dataset.setting,value:event.target.dataset.setting==='cookPower'?event.target.value:event.target.checked}));
+
+ if(event.target.name==='difficulty'){const d=DIFFICULTIES.find(d=>d.id===event.target.value);document.querySelector('#new-assistance').checked=d.assistance;}
+
+
 });
 document.addEventListener('keydown',event=>{const target=event.target.closest('[data-scene]');if(target&&(event.key==='Enter'||event.key===' ')){event.preventDefault();target.dispatchEvent(new MouseEvent('click',{bubbles:true}));}});
-document.addEventListener('input',event=>{if(event.target.id==='search'){const pos=event.target.selectionStart;search=event.target.value;render();const field=document.querySelector('#search');field.focus();field.setSelectionRange(pos,pos);}});
+document.addEventListener('input',event=>{
+ if(event.target.classList.contains('recipe-batch')){const box=event.target.closest('.recipe-card');box.querySelector('.recipe-quote').innerHTML=recipeQuote(state,event.target.dataset.recipe,Number(event.target.value));}
+ if(event.target.dataset.meal){
+  const result=act(state,{type:'meal',resource:event.target.dataset.meal,amount:Number(event.target.value)});
+  if(result.error){event.target.setCustomValidity(result.error);return;}event.target.setCustomValidity('');state=result.state;persist();
+  const template=document.createElement('template');template.innerHTML=renderTable(state);
+  for(const selector of ['.vitals-strip','.meal-preview','.table-panel .section-heading .pill']){const current=document.querySelector(selector),fresh=template.content.querySelector(selector);if(current&&fresh)current.replaceWith(fresh);}
+  const aside=document.querySelector('#side-panel');if(aside)aside.innerHTML=dayPanel();
+  document.querySelectorAll('.recipe-card').forEach(card=>{card.querySelector('.recipe-quote').innerHTML=recipeQuote(state,card.dataset.recipeCard,Number(card.querySelector('.recipe-batch').value));});
+ }
+ if(event.target.id==='search'){const pos=event.target.selectionStart;search=event.target.value;render();const field=document.querySelector('#search');field.focus();field.setSelectionRange(pos,pos);}});
 document.querySelector('#save-file').addEventListener('change',async event=>{
  const file=event.target.files[0];if(!file)return;
  try {if(file.size>1048576)throw new Error('存档文件太大了，请选择小院导出的 JSON 文件。');imported=importGame(await file.text());modal('找到了你的另一座小院。',`<p>这是${imported.phase==='prep'?'准备期':`第 ${imported.day} 天`}的存档，准备金 ${money(imported.money)}。导入后会替换当前进度。</p>`,'<button class="secondary" data-action="close">暂不导入</button><button class="primary" data-action="confirm-import">确认恢复存档</button>');}catch(error){toast(error.message||'这个文件不是有效的小院存档。');}event.target.value='';
@@ -184,3 +224,6 @@ document.querySelector('#save-file').addEventListener('change',async event=>{
 dialog.addEventListener('click',event=>{if(event.target===dialog){const r=dialog.getBoundingClientRect();if(event.clientX<r.left||event.clientX>r.right||event.clientY<r.top||event.clientY>r.bottom)dialog.close();}});
 render();
 if(boot.warning)setTimeout(()=>toast(boot.warning),250);
+else if(state.migratedFrom===1&&boot.state)setTimeout(()=>toast('旧小院已升级：灶台两用、种禽补齐。记得在今日餐桌安排食物。'),350);
+
+initPwa();

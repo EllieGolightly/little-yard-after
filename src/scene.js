@@ -108,23 +108,23 @@ function solarPanels(owned) {
   </g>`;
 }
 
-function pond(owned, hasDucks) {
+function pond(owned, hasDucks, fishCount, duckCount) {
   return `<g aria-hidden="true">
     <ellipse cx="730" cy="350" rx="79" ry="39" fill="#829865" opacity=".12"/>
     <path d="M665 344C663 323 692 304 725 313C750 291 801 308 801 332C829 351 796 376 765 370C728 387 670 374 665 344Z" fill="${owned ? '#b9b798' : '#bdc6a2'}"/>
     <path d="M672 342C671 325 696 313 726 321C756 301 792 313 793 336C813 351 787 367 762 362C727 379 678 367 672 342Z" fill="${owned ? 'url(#yard-water)' : '#cdd2ae'}"/>
     ${owned ? `<path d="M691 344Q703 340 715 344M749 350Q761 346 774 350M720 331Q730 328 742 331" fill="none" stroke="#e4edcf" stroke-width="2" stroke-linecap="round" opacity=".85"/>
-    <g class="yard-fish"><path d="M718 354Q726 346 736 351L743 348L742 356L736 354Q726 362 718 354Z" fill="#dcac78" opacity=".85"/><path d="M769 331Q765 326 757 330L752 327V334L757 332Q765 335 769 331Z" fill="#e8c488"/></g>
+    <g class="yard-fish" opacity="${fishCount>0?1:0}"><path d="M718 354Q726 346 736 351L743 348L742 356L736 354Q726 362 718 354Z" fill="#dcac78" opacity=".85"/><path d="M769 331Q765 326 757 330L752 327V334L757 332Q765 335 769 331Z" fill="#e8c488"/></g>
     <path d="M689 357Q700 346 710 354Q712 365 699 366Q689 366 689 357Z" fill="#88a377"/><path d="M700 354L700 360L710 360" fill="none" stroke="#aac194" stroke-width="1"/>
     <path d="M780 329Q789 319 796 326Q799 334 789 337Q780 337 780 329Z" fill="#8aa87a"/>` : '<path d="M715 344Q730 336 747 344" fill="none" stroke="#a9b48c" stroke-width="1.5" stroke-dasharray="4 5"/>'}
     <g fill="#d8d4b9"><ellipse cx="671" cy="336" rx="8" ry="5" transform="rotate(-30 671 336)"/><ellipse cx="691" cy="319" rx="10" ry="5" transform="rotate(-20 691 319)"/><ellipse cx="725" cy="316" rx="8" ry="4"/><ellipse cx="766" cy="310" rx="10" ry="5"/><ellipse cx="798" cy="328" rx="5" ry="7"/><ellipse cx="797" cy="358" rx="9" ry="5" transform="rotate(-30 797 358)"/><ellipse cx="757" cy="371" rx="10" ry="4"/><ellipse cx="711" cy="373" rx="9" ry="4"/><ellipse cx="677" cy="361" rx="7" ry="4" transform="rotate(30 677 361)"/></g>
     <path d="M791 307Q786 292 790 283M795 308Q797 290 801 282M787 307Q779 297 780 291" fill="none" stroke="#82935e" stroke-width="2" stroke-linecap="round"/><path d="M790 285L789 280M801 284L802 278" stroke="#9f8760" stroke-width="4" stroke-linecap="round"/>
     ${hasDucks && !owned ? '<ellipse cx="745" cy="343" rx="26" ry="14" fill="#a5b4a0"/><ellipse cx="745" cy="339" rx="26" ry="13" fill="#c2cdb4"/><ellipse cx="745" cy="339" rx="22" ry="10" fill="#9bbab0"/>' : ''}
-    ${hasDucks ? duck(746, owned ? 329 : 333, -1) + duck(809, 370, -1) : ''}
+    ${hasDucks ? Array.from({length:Math.min(4,duckCount)},(_,i)=>duck(746+i*20,329+i*14,i%2?1:-1)).join('') : ''}
   </g>`;
 }
 
-function coop(owned) {
+function coop(owned, group) {
   if (!owned) return `<g aria-hidden="true"><path d="M564 409L599 393L646 410L610 428Z" fill="#b5c09b" opacity=".65"/><path d="M570 409L599 396L639 410L610 424Z" fill="none" stroke="#9eae84" stroke-dasharray="3 5"/></g>`;
   return `<g aria-hidden="true">
     <ellipse cx="599" cy="415" rx="53" ry="18" fill="#687a4d" opacity=".13"/>
@@ -141,7 +141,7 @@ function coop(owned) {
     <path d="M576 413L591 418M571 419L586 424M565 425L581 430" stroke="#a68a60" stroke-width="2"/>
     <path d="M625 384L637 378V391L625 397Z" fill="#7c8260"/><path d="M631 381V394M625 391L637 385" stroke="#e2c799" stroke-width="1.5"/>
     <path d="M566 380L573 382M566 391L573 393M599 391L607 394M599 402L607 405" stroke="#c6a670" stroke-width="1"/>
-    ${chicken(655, 425, -1)}${chicken(618, 443, 1)}
+    ${Array.from({length:Math.min(4,(group?.female||0)+(group?.male||0))},(_,i)=>chicken(650-i*19,425+(i%2)*18,i%2?1:-1)).join('')}${Array.from({length:Math.min(3,group?.young?.reduce((n,b)=>n+b.female+b.male,0)||0)},(_,i)=>chicken(653+i*15,447,1,true)).join('')}
     <ellipse cx="670" cy="405" rx="9" ry="4" fill="#d7c398"/><path d="M661 404V408Q670 414 679 408V404" fill="#b9956c"/>
   </g>`;
 }
@@ -292,8 +292,8 @@ export function renderScene(state = {}, { compact = false } = {}) {
 
   <g ${zones('animals', '养殖区，鸡鸭与鱼池')}>
     <title>养殖 · 小院里的新邻居</title>
-    ${pond(has('pond'), has('ducks'))}
-    ${coop(has('coop'))}
+    ${pond(has('pond'),has('ducks'),(state.animals?.pond?.adults||0)+(state.animals?.pond?.young?.length||0),(state.animals?.ducks?.female||0)+(state.animals?.ducks?.male||0)+(state.animals?.ducks?.young?.length||0))}
+    ${coop(has('coop'),state.animals?.coop)}
     <ellipse class="zone-marker" cx="635" cy="442" rx="66" ry="19" fill="none" stroke="#718858" stroke-width="2" stroke-dasharray="3 4"/>
   </g>
 
