@@ -1,0 +1,14 @@
+{
+  "name": "little-yard-after",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "小院之后 · 末日宅家经营小游戏",
+  "scripts": {
+    "dev": "node scripts/server.mjs",
+    "start": "node scripts/server.mjs",
+    "build": "node scripts/build.mjs",
+    "test": "node --test tests/*.test.js"
+  },
+  "engines": { "node": ">=20" }
+}
