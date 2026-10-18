@@ -22,15 +22,18 @@ for (const name of modules) {
 }
 const css = await readFile(resolve(root,'src/styles.css'),'utf8');
 const favicon = await readFile(resolve(root,'public/favicon.svg'),'utf8');
+const faviconPng = await readFile(resolve(root,'public/favicon-32.png'));
 let html = await readFile(resolve(root,'index.html'),'utf8');
-html = html.replace(/    <link rel="(?:manifest|apple-touch-icon)"[^>]+>\n/g, '').replace('href="./public/favicon.svg"',`href="data:image/svg+xml,${encodeURIComponent(favicon)}"`)
+html = html.replace(/    <link rel="(?:manifest|apple-touch-icon)"[^>]+>\n/g, '')
+  .replace(/<link rel="icon" type="image\/png" sizes="32x32" href="[^"]+"\s*\/>/, ()=>`<link rel="icon" type="image/png" sizes="32x32" href="data:image/png;base64,${faviconPng.toString('base64')}" />`)
+  .replace(/<link rel="icon" href="[^"]+" type="image\/svg\+xml"\s*\/>/, ()=>`<link rel="icon" href="data:image/svg+xml,${encodeURIComponent(favicon)}" type="image/svg+xml" />`)
   .replace('<link rel="stylesheet" href="./src/styles.css" />',()=>`<style>${css}</style>`)
   .replace('<script type="module" src="./src/app.js"></script>',()=>`<script type="module">${script.replaceAll('</script','<\\/script')}</script>`);
 await mkdir(resolve(root,'outputs'),{recursive:true});
 await writeFile(resolve(root,'outputs/小院之后.html'),html);
 console.log('双击离线版已生成到 outputs/小院之后.html');
 
-const assets = ['./', './index.html', './manifest.webmanifest', ...modules.map(name=>`./src/${name}.js`), './src/styles.css', './public/favicon.svg', './public/icon-192.png', './public/icon-512.png', './public/icon-maskable-512.png', './public/apple-touch-icon.png'];
+const assets = ['./', './index.html', './manifest.webmanifest', ...modules.map(name=>`./src/${name}.js`), './src/styles.css', './public/favicon.svg', './public/favicon-32.png', './public/icon-192.png', './public/icon-512.png', './public/icon-maskable-192.png', './public/icon-maskable-512.png', './public/apple-touch-icon.png'];
 const hash = createHash('sha256');
 for (const path of assets.filter(path=>path!=='./')) hash.update(await readFile(resolve(out,path)));
 const template = await readFile(resolve(root,'scripts/sw-template.js'),'utf8');
