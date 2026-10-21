@@ -7,7 +7,7 @@ const assetUrls = new Set(ASSETS.map(path => new URL(path, self.registration.sco
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(
     [...assetUrls].map(url => new Request(url, {cache:'reload'}))
-  ));
+  )));
   // Activate the new release immediately; the page reloads on controllerchange.
   self.skipWaiting();
 });

@@ -8,7 +8,7 @@ const scope='https://example.github.io/little-yard-after/';
 function harness({offline=false,failInstall=false}={}){
  const listeners={},stores=new Map(),deleted=[],network=[],claimed=[];
  const cache={async addAll(requests){if(failInstall)throw Error('download interrupted');for(const req of requests)stores.set(req.url,new Response(req.url));},async match(key){return stores.get(typeof key==='string'?key:key.url);}};
- const context={URL,Request,Response,Set,Promise,self:{registration:{scope},clients:{claim:async()=>claimed.push(true)},addEventListener:(name,fn)=>listeners[name]=fn},caches:{open:async()=>cache,keys:async()=>[`little-yard-after:${scope}:old`,'other-app:v1','little-yard-after:https://example.github.io/another/:old'],delete:async key=>deleted.push(key)},fetch:async request=>{network.push(request.url);if(offline)throw Error('offline');return new Response('network');}};
+ const context={URL,Request,Response,Set,Promise,self:{registration:{scope},clients:{claim:async()=>claimed.push(true)},skipWaiting:async()=>{},addEventListener:(name,fn)=>listeners[name]=fn},caches:{open:async()=>cache,keys:async()=>[`little-yard-after:${scope}:old`,'other-app:v1','little-yard-after:https://example.github.io/another/:old'],delete:async key=>deleted.push(key)},fetch:async request=>{network.push(request.url);if(offline)throw Error('offline');return new Response('network');}};
  vm.runInNewContext(worker,context);return {listeners,stores,deleted,network,claimed};
 }
 const waitEvent=async fn=>{let waiting;fn({waitUntil:p=>waiting=p});await waiting;};
