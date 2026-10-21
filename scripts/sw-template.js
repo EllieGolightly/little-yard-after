@@ -7,8 +7,9 @@ const assetUrls = new Set(ASSETS.map(path => new URL(path, self.registration.sco
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(
     [...assetUrls].map(url => new Request(url, {cache:'reload'}))
-  )));
-  // Wait for existing game windows to close; don't mix old and new modules.
+  ));
+  // Activate the new release immediately; the page reloads on controllerchange.
+  self.skipWaiting();
 });
 self.addEventListener('activate', event => {
   event.waitUntil((async () => {

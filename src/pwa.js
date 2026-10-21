@@ -37,22 +37,33 @@ export function initPwa() {
     setStatus('本地开发预览；发布版支持离线安装。');
     return;
   }
+  // New release activates via skipWaiting; reload once so the page uses new modules.
+  let updatePending = false;
+  let refreshing = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (refreshing || !updatePending) return;
+    refreshing = true;
+    location.reload();
+  });
   const register = async () => {
     try {
       const registration = await navigator.serviceWorker.register('./sw.js', {scope:'./', updateViaCache:'none'});
-      const waiting = () => setStatus('新版本已准备好。关闭所有小院窗口后重新打开即可更新，存档会保留。');
       const ready = () => setStatus('离线小院已准备好，添加到主屏幕后也可以断网游玩。');
-      if (registration.waiting) waiting();
-      else if (registration.active) ready();
+      const updating = () => setStatus('新版本已准备好，正在为你更新……');
+      if (registration.active) ready();
       else setStatus('正在准备离线小院，请保持联网片刻……');
       registration.addEventListener('updatefound', () => {
         const worker = registration.installing;
         worker?.addEventListener('statechange', () => {
-          if (worker.state === 'installed') navigator.serviceWorker.controller ? waiting() : ready();
+          if (worker.state === 'installed') {
+            // A controller already exists, so this is an update, not the first install.
+            if (navigator.serviceWorker.controller) { updatePending = true; updating(); }
+            else ready();
+          }
           if (worker.state === 'redundant') setStatus('本次离线准备没有完成，下次联网打开时会重试。');
         });
       });
-      navigator.serviceWorker.ready.then(() => { if (!registration.waiting) ready(); });
+      navigator.serviceWorker.ready.then(() => { if (!updatePending) ready(); });
     } catch {
       setStatus('暂未完成离线准备；可以继续在线玩，下次联网打开时会重试。');
     }
