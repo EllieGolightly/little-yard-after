@@ -1,6 +1,7 @@
 /* A tiny, living illustration. All artwork is native SVG; no image dependencies. */
 
 import { CROPS, WEATHER } from './data.js';
+import { getSeasonIndex } from './engine.js';
 
 const present = (value) => {
   if (typeof value === 'object' && value !== null) return value.owned !== false && value.level !== 0 && value.count !== 0;
@@ -146,6 +147,35 @@ function coop(owned, group) {
   </g>`;
 }
 
+const YARD_GROUND_PATH = 'M114 281C115 225 241 177 372 174C474 167 527 160 643 191C765 201 836 272 825 345C867 402 775 458 670 473C535 497 392 493 244 463C151 444 55 384 77 329C80 307 94 291 114 281Z';
+// 地面季节色：冬天铺一层薄雪、秋天染一层暖色。绘制在地面之后、物体之前
+function seasonGround(state) {
+  if (!state.settings?.seasons) return '';
+  const idx = getSeasonIndex(Number(state.day) || 1);
+  if (idx === 3) return `<path d="${YARD_GROUND_PATH}" fill="#f1f5ec" opacity=".78"/>`;
+  if (idx === 2) return `<path d="${YARD_GROUND_PATH}" fill="#e2c99f" opacity=".16"/>`;
+  return '';
+}
+// 季节氛围：冬天飘雪、秋天落叶。只是叠加层，不改变原有绘制
+function seasonOverlay(state) {
+  if (!state.settings?.seasons) return '';
+  const idx = getSeasonIndex(Number(state.day) || 1);
+  if (idx === 3) {
+    const flakes = Array.from({ length: 24 }, (_, i) => {
+      const x = (i * 61) % 880 + 10, y = (i * 43) % 470 + 12;
+      return `<circle class="snowflake" cx="${x}" cy="${y}" r="${2.2 + (i % 3) * .8}" fill="#fffef8" opacity=".85"/>`;
+    }).join('');
+    return `<g aria-hidden="true">${flakes}</g>`;
+  }
+  if (idx === 2) {
+    const leaves = Array.from({ length: 12 }, (_, i) => {
+      const x = (i * 73) % 880 + 10, y = (i * 47) % 440 + 15;
+      return `<path class="falling-leaf" d="M${x} ${y} q5 -3 9 0 q-4 4 -9 0Z" fill="${i % 2 ? '#d4a259' : '#c08a52'}" opacity=".6"/>`;
+    }).join('');
+    return `<g aria-hidden="true">${leaves}</g>`;
+  }
+  return '';
+}
 /** Render a self-contained SVG. Scene events are delegated through data-scene. */
 export function renderScene(state = {}, { compact = false } = {}) {
   const f = state.facilities || {};
@@ -181,7 +211,11 @@ export function renderScene(state = {}, { compact = false } = {}) {
     @keyframes yard-drift{0%,100%{transform:translate(0,0);opacity:.3}50%{transform:translate(6px,-7px);opacity:.55}}
     @keyframes yard-swim{0%,100%{transform:translateX(0)}50%{transform:translateX(7px)}}
     @keyframes yard-sway{0%,100%{transform:rotate(-2deg)}50%{transform:rotate(2deg)}}
-    @media(prefers-reduced-motion:reduce){.yard-smoke,.yard-fish,.yard-leaf{animation:none}.yard-zone .zone-marker{transition:none}}
+    .snowflake{animation:yard-snow 7s ease-in-out infinite}
+    @keyframes yard-snow{0%,100%{transform:translateY(-4px)}50%{transform:translateY(8px)}}
+    .falling-leaf{animation:yard-leaf-fall 9s ease-in-out infinite}
+    @keyframes yard-leaf-fall{0%,100%{transform:translateY(-3px) rotate(0)}50%{transform:translateY(9px) rotate(25deg)}}
+    @media(prefers-reduced-motion:reduce){.yard-smoke,.yard-fish,.yard-leaf,.snowflake,.falling-leaf{animation:none}.yard-zone .zone-marker{transition:none}}
   </style>
 
   <g aria-hidden="true">
@@ -196,6 +230,7 @@ export function renderScene(state = {}, { compact = false } = {}) {
     <path d="M406 407Q410 418 427 427M460 452L481 458M468 474L490 470M389 393L414 398" fill="none" stroke="#d8cca8" stroke-width="2" stroke-linecap="round"/>
     <ellipse cx="490" cy="351" rx="170" ry="46" fill="#6f7c51" opacity=".12"/>
   </g>
+  ${seasonGround(state)}
 
   ${fence(126, 264, 280, 201, 10)}
   ${fence(612, 172, 789, 250, 10)}
@@ -311,6 +346,7 @@ export function renderScene(state = {}, { compact = false } = {}) {
     <path d="M457 469L472 472M457 473L467 475" stroke="#9ca27c" stroke-width="1.5" stroke-linecap="round"/>
   </g>
   ${rainy ? '<g aria-hidden="true" stroke="#a5bab1" stroke-width="1.5" stroke-linecap="round" opacity=".35"><path d="M204 155L200 166M248 189L244 200M714 99L710 110M771 179L767 190M171 369L167 380M702 464L698 475M794 303L790 314"/></g>' : ''}
+  ${seasonOverlay(state)}
   </svg>`;
 }
 

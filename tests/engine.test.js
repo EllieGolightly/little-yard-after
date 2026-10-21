@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ITEMS, STARTER_CART, CROPS, RESOURCE_META } from '../src/data.js';
-import { createGame, buyCart, startGame, advanceDay, act, getDerived, getForecast, getCropDuration, validateSave, getStarterCart, getMealPreview, getAnimalInfo } from '../src/engine.js';
+import { ITEMS, STARTER_CART, CROPS, RESOURCE_META, NEIGHBORS, NEIGHBOR_REQUESTS, bondLevel } from '../src/data.js';
+import { createGame, buyCart, startGame, advanceDay, act, getDerived, getForecast, getCropDuration, validateSave, getStarterCart, getMealPreview, getAnimalInfo, getSeason, getSeasonIndex, getWishes, getTradesLeft, getCollection, getCollectionCount, getCollectionTotal, getEndingTitle } from '../src/engine.js';
 
 function unwrap(result) {
   assert.equal(result.error, undefined, result.error);
@@ -20,7 +20,7 @@ function assertValid(state) {
 test('starter fits fixed budget and provides the advertised inventory and dependencies', () => {
   const state = prepared();
   const price = Object.entries(STARTER_CART).reduce((sum, [id, amount]) => sum + ITEMS.find(item => item.id === id).price * amount, 0);
-  assert.equal(price, 24480);
+  assert.equal(price, 27040);
   assert.equal(state.money, 30000 - price);
   assert.equal(state.inventory.food, 37);
   assert.equal(state.inventory.water, 195);
@@ -255,4 +255,232 @@ test('all starter difficulties support deterministic 60-day gardening and meals 
  }
  assert.equal(s.stats.assists,0);assert.equal(s.milestoneSeen,true);assert.equal(s.stats.days,60);assert.ok(s.health>=80);return s;}
  for(const difficulty of ['cozy','balanced','hard'])assert.deepEqual(run(difficulty),run(difficulty));
+});
+
+// 完整经营推进到指定天数（含播种/收获/做饭/餐桌），用于季节机制测试
+function farmTo(days){
+ let s=started();
+ for(let d=1;d<=days;d++){
+  for(let p=0;p<s.plots.length;p++){
+   if(s.plots[p].crop&&s.plots[p].progress>=getCropDuration(s,s.plots[p].crop))s=unwrap(act(s,{type:'harvest',plot:p}));
+   if(!s.plots[p].crop)s=unwrap(act(s,{type:'plant',plot:p,crop:p===0?'fodder':'potatoes'}));
+  }
+  if(s.inventory.potatoes>=2){const r=act(s,{type:'cook',recipe:'potato',batch:2});if(!r.error)s=r.state;}
+  s=unwrap(act(s,{type:'mealPreset',mode:'balanced'}));
+  s=unwrap(advanceDay(s));
+ }
+ return s;
+}
+test('seasons rotate every 30 days in spring-summer-autumn-winter order',()=>{
+ assert.equal(getSeasonIndex(1),0);assert.equal(getSeasonIndex(30),0);
+ assert.equal(getSeasonIndex(31),1);assert.equal(getSeasonIndex(61),2);
+ assert.equal(getSeasonIndex(91),3);assert.equal(getSeason(91).id,'winter');
+ assert.equal(getSeasonIndex(121),0);assert.equal(getSeason(121).id,'spring');
+});
+test('forecast applies seasonal temperature and sun modifiers',()=>{
+ const winter=getForecast(91,1)[0];
+ assert.equal(winter.temperature,7); // 多云 25 + 冬(-18)
+ assert.equal(winter.sun,0.28); // 0.7 × 0.4
+ const summer=getForecast(32,1)[0];
+ assert.ok(summer.temperature>getForecast(2,1)[0].temperature);
+});
+test('winter heating burns fuel first and keeps the room warm',()=>{
+ const s=farmTo(91);
+ assert.equal(s.inventory.fuel,29); // 第91天烧 1 L
+ assert.equal(s.coldToday,false);
+});
+test('heating fallback order is fuel, hay, materials, then electric',()=>{
+ const base=farmTo(91); // 第91天结束，day=92，仍在冬天
+ function step(mutate){
+  let t=structuredClone(base);mutate(t);
+  t=unwrap(act(t,{type:'mealPreset',mode:'balanced'}));
+  return advanceDay(t).state;
+ }
+ const withFuel=step(t=>{t.inventory.fuel=5;t.inventory.feed=0;t.inventory.materials=0;t.inventory.power=0;});
+ assert.equal(withFuel.inventory.fuel,4);assert.equal(withFuel.coldToday,false);
+ const withHay=step(t=>{t.inventory.fuel=0;t.inventory.feed=100;t.inventory.materials=0;t.inventory.power=0;});
+ assert.equal(withHay.coldToday,false);assert.ok(withHay.inventory.feed<100);assert.equal(withHay.inventory.fuel,0);
+ const withMat=step(t=>{t.inventory.fuel=0;t.inventory.feed=0;t.inventory.materials=10;t.inventory.power=0;});
+ assert.equal(withMat.inventory.materials,8);assert.equal(withMat.coldToday,false);
+ const withElec=step(t=>{t.inventory.fuel=0;t.inventory.feed=0;t.inventory.materials=0;t.inventory.power=10;});
+ assert.equal(withElec.coldToday,false);assert.ok(withElec.inventory.power>=7);
+ const cold=step(t=>{t.inventory.fuel=0;t.inventory.feed=0;t.inventory.materials=0;t.inventory.power=0;});
+ assert.equal(cold.coldToday,true);
+});
+test('unheated cold day costs health but never pushes it below 40',()=>{
+ const base=farmTo(91);
+ function step(mutate){
+  let t=structuredClone(base);mutate(t);
+  t=unwrap(act(t,{type:'mealPreset',mode:'balanced'}));
+  return advanceDay(t).state;
+ }
+ const warm=step(t=>{t.health=50;t.inventory.fuel=5;t.inventory.feed=0;t.inventory.materials=0;});
+ assert.equal(warm.coldToday,false);assert.equal(warm.health,51); // 只吃饭 +1
+ const cold=step(t=>{t.health=50;t.inventory.fuel=0;t.inventory.feed=0;t.inventory.materials=0;t.inventory.power=0;});
+ assert.equal(cold.coldToday,true);assert.equal(cold.health,50); // 吃饭 +1、寒冷 -1
+ const low=step(t=>{t.health=40;t.inventory.fuel=0;t.inventory.feed=0;t.inventory.materials=0;t.inventory.power=0;});
+ assert.equal(low.health,41); // 40 以下不再因寒冷扣，吃饭 +1
+});
+test('seasonal wishes are exposed with progress and grant materials on completion',()=>{
+ const s=started();
+ assert.equal(getWishes(s).length,3);
+ const t=unwrap(act(s,{type:'mealPreset',mode:'balanced'}));
+ const next=advanceDay(t).state;
+ assert.ok(getWishes(next).some(w=>w.metric==='foodDays'&&w.done)); // 第1天结束，食物储备充足
+});
+test('season change resets wishes and season stats',()=>{
+ const s=farmTo(30); // 第30天结束，进入夏季
+ assert.equal(s.wishes.season,'summer');
+ assert.equal(s.seasonStats.plantings,0);
+ assert.equal(s.seasonStats.harvests,0);
+});
+test('v2 saves migrate to v3, restoring seasons, chapters and wishes',()=>{
+ const s=started();
+ const v2=structuredClone(s);
+ v2.version=2;
+ delete v2.chapter;delete v2.wishes;delete v2.seasonStats;delete v2.coldToday;
+ v2.settings={generator:s.settings.generator,fridge:s.settings.fridge,autoCare:s.settings.autoCare,cookPower:s.settings.cookPower};
+ const migrated=validateSave(v2);
+ assert.equal(migrated.version,5);
+ assert.ok(migrated.chapter&&migrated.wishes&&migrated.seasonStats);
+ assert.equal(migrated.settings.heatPower,'auto');
+ assert.equal(migrated.settings.seasons,true);
+ assert.ok(migrated.neighbors);
+});
+test('seasons can be disabled, removing seasonal field and winter effects',()=>{
+ const base=farmTo(91);
+ let t=structuredClone(base);
+ t=unwrap(act(t,{type:'settings',key:'seasons',value:false}));
+ assert.equal(t.settings.seasons,false);
+});
+
+// ── 阶段2：邻居、好感、交换、求助 ──
+test('bondLevel maps bond to the four named levels',()=>{
+ assert.equal(bondLevel(0).name,'陌生');assert.equal(bondLevel(19).name,'陌生');
+ assert.equal(bondLevel(20).name,'认识');assert.equal(bondLevel(39).name,'认识');
+ assert.equal(bondLevel(40).name,'熟络');assert.equal(bondLevel(69).name,'熟络');
+ assert.equal(bondLevel(70).name,'亲近');assert.equal(bondLevel(100).name,'亲近');
+});
+test('higher bond grants more daily trades',()=>{
+ let s=structuredClone(farmTo(130));
+ assert.equal(getTradesLeft(s,'zhou'),2);
+ s.neighbors.bond.zhou=40;assert.equal(getTradesLeft(s,'zhou'),3);
+ s.neighbors.bond.zhou=70;assert.equal(getTradesLeft(s,'zhou'),4);
+});
+test('neighbors unlock at day 130 and 150 with daily limits refreshed',()=>{
+ assert.deepEqual(farmTo(129).neighbors.met,[]);
+ const first=farmTo(130);
+ assert.ok(first.neighbors.met.includes('zhou')&&first.neighbors.met.includes('he'));
+ assert.ok(!first.neighbors.met.includes('chen'));
+ assert.equal(first.neighbors.giftLeft.zhou,1);
+ assert.ok(farmTo(150).neighbors.met.includes('chen'));
+});
+test('trade converts resources and respects the daily limit and acquaintance check',()=>{
+ let s=structuredClone(farmTo(130));
+ const eggs=s.inventory.chickenEggs,fuel=s.inventory.fuel;
+ s=unwrap(act(s,{type:'trade',neighbor:'zhou',tradeIndex:0}));
+ assert.equal(s.inventory.chickenEggs,eggs-2);
+ assert.equal(s.inventory.fuel,fuel+1);
+ assert.equal(s.neighbors.traded,1);
+ assert.ok(act(s,{type:'trade',neighbor:'chen',tradeIndex:0}).error);
+});
+test('gift raises bond once per neighbor per day',()=>{
+ let s=structuredClone(farmTo(130));
+ const bond=s.neighbors.bond.zhou;
+ s=unwrap(act(s,{type:'gift',neighbor:'zhou'}));
+ assert.equal(s.neighbors.bond.zhou,bond+3);
+ assert.equal(s.neighbors.giftLeft.zhou,0);
+ assert.ok(act(s,{type:'gift',neighbor:'zhou'}).error);
+});
+test('help request consumes need, grants reward and bond, and records the help',()=>{
+ let s=structuredClone(farmTo(135));
+ assert.equal(s.neighbors.requests.he_eggs,'active');
+ const eggs=s.inventory.chickenEggs,seeds=s.inventory.seeds;
+ s=unwrap(act(s,{type:'helpRequest',requestId:'he_eggs'}));
+ assert.equal(s.inventory.chickenEggs,eggs-2);
+ assert.equal(s.inventory.seeds,seeds+2);
+ assert.equal(s.neighbors.requests.he_eggs,'done');
+ assert.equal(s.neighbors.bond.he,10);
+ assert.equal(s.neighbors.helped,1);
+});
+test('neighbors feature can be disabled from settings',()=>{
+ let s=structuredClone(farmTo(130));
+ s=unwrap(act(s,{type:'settings',key:'neighbors',value:false}));
+ assert.equal(s.settings.neighbors,false);
+});
+test('v3 saves migrate to v5 and restore the neighbor block',()=>{
+ const v3=structuredClone(started());
+ v3.version=3;delete v3.neighbors;
+ const migrated=validateSave(v3);
+ assert.equal(migrated.version,5);
+ assert.ok(migrated.neighbors&&migrated.neighbors.bond);
+});
+
+// ── 阶段3：图鉴、装饰、节日、结局 ──
+test('collection totals 17 and records crops, recipes, animals, neighbors',()=>{
+ assert.equal(getCollectionTotal(started()),17);
+ assert.equal(getCollectionCount(started()),0);
+ const s=farmTo(135);
+ assert.ok(s.discovered.crops.includes('fodder'));
+ assert.ok(s.discovered.crops.includes('potatoes'));
+ assert.ok(s.discovered.recipes.includes('potato'));
+ assert.ok(s.neighbors.met.includes('zhou'));
+ assert.ok(getCollection(s).neighbors.find(n=>n.id==='zhou').found);
+ assert.ok(getCollectionCount(s)>=4);
+});
+test('decorations cost materials, add comfort and respect limits',()=>{
+ let s=started();
+ const before=getDerived(s).comfort;
+ s.inventory.materials=10;
+ s=unwrap(act(s,{type:'buildDecoration',decoration:'flag'}));
+ assert.equal(s.decorations.flag,1);
+ assert.equal(getDerived(s).comfort,before+2);
+ assert.equal(act(s,{type:'buildDecoration',decoration:'flag'}).error,'这里已经布置得足够啦。');
+ s.inventory.materials=0;
+ assert.ok(act(s,{type:'buildDecoration',decoration:'flowerbox'}).error);
+ s.inventory.materials=10;
+ s=unwrap(act(s,{type:'buildDecoration',decoration:'lanterns'}));
+ assert.equal(s.decorations.lanterns,1);
+});
+test('decoration blocks construction without its prerequisite',()=>{
+ const s=started();
+ delete s.facilities.solar;
+ s.inventory.materials=10;
+ assert.ok(act(s,{type:'buildDecoration',decoration:'lanterns'}).error);
+});
+test('festival activates in window, celebrates with cost, reward and glow',()=>{
+ let s=farmTo(120);
+ assert.equal(s.festivals.winterSolstice,'active');
+ const foodBefore=s.inventory.food;
+ s=unwrap(act(s,{type:'celebrateFestival',festival:'winterSolstice'}));
+ assert.equal(s.festivals.winterSolstice,'celebrated');
+ assert.equal(s.inventory.food,foodBefore-1);
+ assert.equal(s.festivalGlow,8);
+ assert.ok(act(s,{type:'celebrateFestival',festival:'winterSolstice'}).error);
+});
+test('festival is missed after its window and cannot be celebrated',()=>{
+ const s=farmTo(124);
+ assert.equal(s.festivals.winterSolstice,'missed');
+ assert.ok(act(s,{type:'celebrateFestival',festival:'winterSolstice'}).error);
+});
+test('ending unlocks on day 180 and accepts a single choice',()=>{
+ let s=farmTo(179);
+ assert.equal(s.ending.unlocked,false);
+ assert.ok(act(s,{type:'chooseEnding',choice:'stay'}).error);
+ s=unwrap(advanceDay(unwrap(act(s,{type:'mealPreset',mode:'balanced'}))));
+ assert.equal(s.ending.unlocked,true);
+ s=unwrap(act(s,{type:'chooseEnding',choice:'stay'}));
+ assert.equal(s.ending.choice,'stay');
+ assert.ok(s.ending.seenAt);
+ assert.ok(getEndingTitle(s).startsWith('留下'));
+ assert.ok(act(s,{type:'chooseEnding',choice:'return'}).error);
+});
+test('v4 saves migrate to v5 restoring collection, decorations, festivals and ending',()=>{
+ const v4=structuredClone(farmTo(185));
+ v4.version=4;
+ delete v4.discovered;delete v4.decorations;delete v4.festivals;delete v4.ending;delete v4.festivalGlow;
+ const migrated=validateSave(v4);
+ assert.equal(migrated.version,5);
+ assert.ok(migrated.discovered&&migrated.decorations&&migrated.festivals&&migrated.ending);
+ assert.equal(migrated.ending.unlocked,true);
 });

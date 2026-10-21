@@ -3,7 +3,7 @@ import { validateSave } from './engine.js';
 export const STORAGE_KEY = 'little-yard-after:v1';
 
 const FORMAT = 'little-yard-after';
-const VERSION = 2;
+const VERSION = 5;
 const MAX_BYTES = 1024 * 1024;
 const BACKUP_KEY = `${STORAGE_KEY}:backup`;
 const CORRUPT_KEY = `${STORAGE_KEY}:corrupt`;
@@ -44,7 +44,7 @@ export function importGame(text) {
   }
   if (raw && typeof raw === 'object' && !Array.isArray(raw) && 'format' in raw) {
     if (raw.format !== FORMAT) throw new Error('这个文件不是《小院之后》的存档。');
-    if (![1, VERSION].includes(raw.version)) throw new Error('暂不支持这个版本的存档，请使用当前版本导出的文件。');
+    if (![1, 2, 3, 4, VERSION].includes(raw.version)) throw new Error('暂不支持这个版本的存档，请使用当前版本导出的文件。');
     raw = raw.game;
   }
   return validateSave(raw);

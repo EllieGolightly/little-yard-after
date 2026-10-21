@@ -40,7 +40,7 @@ test('export/import round trips the canonical game and a bare game without stora
   const serialized = exportGame(state);
   const wrapper = JSON.parse(serialized);
   assert.equal(wrapper.format, 'little-yard-after');
-  assert.equal(wrapper.version, 2);
+  assert.equal(wrapper.version, 5);
   assert.equal(Number.isNaN(Date.parse(wrapper.savedAt)), false);
   assert.deepEqual(importGame(serialized), validateSave(state));
   assert.deepEqual(importGame(JSON.stringify(state)), validateSave(state));
@@ -173,7 +173,7 @@ test('v1 migration preserves inventory, plots, budget and an immutable first-upg
  const old=JSON.parse(await readFile(new URL('./fixtures/v1-day4.json',import.meta.url),'utf8'));
  const raw=JSON.stringify({format:'little-yard-after',version:1,game:old});
  const {data,writes}=mockStorage({[STORAGE_KEY]:raw});
- const migrated=loadGame().state;assert.equal(migrated.version,2);assert.equal(migrated.day,4);assert.equal(migrated.money,old.money);assert.deepEqual(migrated.plots,old.plots);
+ const migrated=loadGame().state;assert.equal(migrated.version,5);assert.equal(migrated.day,4);assert.equal(migrated.money,old.money);assert.deepEqual(migrated.plots,old.plots);
  for(const[k,q]of Object.entries(old.inventory))assert.equal(migrated.inventory[k],q);
  assert.equal(migrated.animals.coop.female,2);assert.equal(migrated.animals.coop.male,1);assert.equal(migrated.settings.cookPower,'auto');assert.equal(migrated.health,100);assert.deepEqual(writes,[]);
  assert.equal(saveGame(migrated).ok,true);assert.equal(data.get(`${STORAGE_KEY}:legacy-v1`),raw);assert.equal(saveGame(migrated).ok,true);assert.equal(data.get(`${STORAGE_KEY}:legacy-v1`),raw);assert.deepEqual(validateSave(migrated),migrated);
